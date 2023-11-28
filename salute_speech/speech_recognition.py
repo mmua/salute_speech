@@ -1,9 +1,9 @@
 from time import time
 from io import FileIO
-import requests
 import uuid
-from salute_speech.utils.package import get_config_path
 from urllib.parse import urlencode
+from salute_speech.utils.russian_certs import russian_secure_get, russian_secure_post
+
 
 class UploadError(Exception):
     """Exception raised for errors during the file upload process."""
@@ -18,13 +18,13 @@ class InvalidAudioFormatError(Exception):
     pass
 
 
-def russian_secure_post(url, **kwargs):
-    pem_path = get_config_path('russian.pem')
-    return requests.post(url, verify=pem_path, **kwargs)
+class SpeechRecognitionTask:
+    def __init__(self, result_data):
+        self.id = result_data.get('id')
+        self.created_at = result_data.get('created_at')
+        self.updated_at = result_data.get('updated_at')
+        self.status = result_data.get('status')
 
-def russian_secure_get(url, **kwargs):
-    pem_path = get_config_path('russian.pem')
-    return requests.get(url, verify=pem_path, **kwargs)
 
 class SberSpeechRecognition:
     def __init__(self, client_credentials, base_url="https://smartspeech.sber.ru/rest/v1/"):
@@ -44,7 +44,7 @@ class SberSpeechRecognition:
         """
         Generate the headers for the request.
 
-        :param bool: No content type
+        :param raw: No content type
         :return: A dictionary with the required headers.
         """
         if self.token_expiry is None or time() * 1000 > self.token_expiry:  # token_expiry in milliseconds
@@ -99,12 +99,12 @@ class SberSpeechRecognition:
 
         return response_json
 
-    def upload_file(self, audio_file: FileIO):
+    def upload_file(self, audio_file: FileIO) -> str:
         """
         Upload an audio file to the Sber Speech Recognition service.
 
         :param audio_file_path: Path to the audio file.
-        :return: Response from the server.
+        :return: request_file_id.
         """
         url = self.base_url + "data:upload"
         headers = self._get_headers(raw=True)
@@ -197,7 +197,7 @@ class SberSpeechRecognition:
         if 'status' in response_json and response_json['status'] != 200:
             raise Exception(f"Failed to initiate speech recognition: {response.text}")
 
-        return response_json.get('result')
+        return SpeechRecognitionTask(response_json.get('result'))
 
     def get_task_status(self, task_id):
         """
@@ -239,9 +239,3 @@ class SberSpeechRecognition:
 
         # Save the file content to output_file
         output_file.write(response.content)
-
-# Example usage
-# api_key = "YOUR_API_KEY"
-# sber_speech = SberSpeechRecognition(api_key)
-# response = sber_speech.recognize_speech("/path/to/audio/file.wav")
-# print(response)

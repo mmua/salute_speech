@@ -10,9 +10,9 @@ from salute_speech.utils.package import get_config_path
 
 class TestSberSpeechRecognition(unittest.TestCase):
     def setUp(self):
-        self.api_key = "test_api_key"
-        self.sber_speech = SberSpeechRecognition(self.api_key)
-        self.sber_speech.token = self.api_key
+        self.client_credentials = "Base64EncodedClientCredentials"
+        self.sber_speech = SberSpeechRecognition(self.client_credentials)
+        self.sber_speech.token = "some-token"
         self.sber_speech.token_expiry = time() * 1000 + 10000
 
     @patch('requests.post')
@@ -37,7 +37,7 @@ class TestSberSpeechRecognition(unittest.TestCase):
         # Assert the request was called correctly
         mock_post.assert_called_with(
             "https://smartspeech.sber.ru/rest/v1/data:upload",
-            headers={"Authorization": f"Bearer {self.api_key}"},
+            headers={"Authorization": f"Bearer {self.sber_speech.token}"},
             data=dummy_file,
             verify=get_config_path('russian.pem')
         )

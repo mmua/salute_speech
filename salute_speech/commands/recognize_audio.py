@@ -1,19 +1,11 @@
 import os
 import click
 from dotenv import load_dotenv, find_dotenv
-from salute_speech.speech_recognition import SberSpeechRecognition
-from pydub.utils import mediainfo
+from salute_speech.speech_recognition import SberSpeechRecognition, SpeechRecognitionTask
+from salute_speech.utils.audio import get_audio_params
+
 
 _ = load_dotenv(find_dotenv())
-
-
-def get_audio_params(audio_file_path):
-    info = mediainfo(audio_file_path)
-    audio_encoding = info['codec_name'].upper()  # Default value, adjust as needed
-    sample_rate = int(info['sample_rate'])
-    channels_count = int(info['channels'])
-
-    return audio_encoding, sample_rate, channels_count
 
 
 @click.command()
@@ -27,6 +19,5 @@ def recognize_audio(audio_file_path: click.Path(exists=True), file_id: str):
 
     audio_encoding, sample_rate, channels_count = get_audio_params(audio_file_path)
     sr = SberSpeechRecognition(api_key)
-    response = sr.async_recognize(file_id, audio_encoding=audio_encoding, sample_rate=sample_rate, channels_count=channels_count)
-    print(response)
-
+    task = sr.async_recognize(file_id, audio_encoding=audio_encoding, sample_rate=sample_rate, channels_count=channels_count)
+    print("speech recognition task created with id: ", task.id)
