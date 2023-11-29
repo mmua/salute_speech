@@ -17,8 +17,9 @@ def download_result(response_file_id: str, audio_file_path: click.Path()):
         raise click.Abort
 
     sr = SberSpeechRecognition(api_key)
+    transcript_data = sr.download_result(response_file_id)
     if audio_file_path:
-        with open(audio_file_path, "wb") as audio_file:
-            sr.download_result(response_file_id, audio_file)
+        with open(audio_file_path, "w") as audio_file:
+            audio_file.write(transcript_data)
     else:
-        sr.download_result(response_file_id, sys.stdout.buffer)
+        click.echo(transcript_data)
