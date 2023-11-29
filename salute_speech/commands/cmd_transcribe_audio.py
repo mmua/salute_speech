@@ -41,15 +41,22 @@ def filename_to_format(output_file: str):
 
 @click.command()
 @click.argument('audio_file_path', nargs=1, type=click.Path(exists=True))
+@click.option('--channels', type=int, default=1, help='Number of channels for transcription. Default: 1')
 @click.option('--language', type=click.Choice(['ru-RU', 'en-US', 'kk-KZ']), default='ru-RU', help='Language for speech recognition. Default: ru-RU')
 @click.option('--output_format', '-f', type=click.Choice(['txt', 'vtt', 'srt', 'tsv', 'json', ''], case_sensitive=False), 
               default='', help='Output format of the transcription.')
 @click.option('--output_file', '-o', type=click.Path(), 
               default='', help='Output path of the transcription.')
-def transcribe_audio(audio_file_path, language, output_format, output_file):
+def transcribe_audio(audio_file_path, channels: int, language: str, output_format: str, output_file: str):
     api_key = os.getenv("SBER_SPEECH_API_KEY")
     if api_key is None:
         click.echo(click.style('Error: env variable SBER_SPEECH_API_KEY is not set', fg='red'))
+        raise click.Abort
+
+    audio_encoding, sample_rate, channels_count = get_audio_params(audio_file_path)
+    if channels_count != channels:
+        click.echo(click.style('Error: unexpected audio channels number - {channels_count}.'
+                               '1 channel is recommended since Salute Speech transcribes each channel independently.', fg='red'))
         raise click.Abort
 
     sr = SberSpeechRecognition(api_key)
@@ -57,15 +64,12 @@ def transcribe_audio(audio_file_path, language, output_format, output_file):
     with open(audio_file_path, "rb") as audio_file:
         file_id = sr.upload_file(audio_file)
 
-    audio_encoding, sample_rate, channels_count = get_audio_params(audio_file_path)
     transcription_task = sr.async_recognize(file_id, audio_encoding=audio_encoding, sample_rate=sample_rate, channels_count=channels_count, language=language)
 
     result_file_id = polling_get_result_file_id(sr, transcription_task.id)
 
-    transcript_file = BytesIO()
-    sr.download_result(result_file_id, transcript_file)
-    transcript_file.seek(0)
-    transcript = json.load(transcript_file)
+    transcript_data = sr.download_result(result_file_id)
+    transcript = json.loads(transcript_data)
 
     # Infer format from output file if necessary
     if not output_format and output_file:

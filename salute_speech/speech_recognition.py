@@ -221,7 +221,7 @@ class SberSpeechRecognition:
 
         return response_json.get('result')
 
-    def download_result(self, response_file_id: str, output_file: FileIO):
+    def download_result(self, response_file_id: str) -> bytes:
         """
         Download the result file from the Sber Speech Recognition service.
 
@@ -238,4 +238,4 @@ class SberSpeechRecognition:
             raise Exception(f"Failed to download the file: {response.text}")
 
         # Save the file content to output_file
-        output_file.write(response.content)
+        return response.text
