@@ -1,11 +1,10 @@
-from io import BytesIO
 import json
 import os
 import sys
 import time
 import click
 from dotenv import load_dotenv, find_dotenv
-from salute_speech.speech_recognition import SberSpeechRecognition
+from salute_speech.speech_recognition import SberSpeechRecognition, TaskStatusResponseError
 from salute_speech.utils.audio import get_audio_params
 from salute_speech.utils.result_writer import get_writer
 
@@ -20,11 +19,13 @@ def polling_get_result_file_id(sr: SberSpeechRecognition, task_id):
         if task_status['status'] == 'ERROR':
             # Handle error
             click.echo("An error occurred during transcription.", err=True)
-            raise RuntimeError("Failed to transcribe file: " + task_id + "\nError" + task_status['error'])
-        elif task_status['status'] == 'DONE':
+            raise TaskStatusResponseError("Failed to transcribe file: " + task_id + "\nError" + task_status['error'])
+        
+        if task_status['status'] == 'DONE':
             return task_status['response_file_id']
-        else:
-            time.sleep(10)
+        
+        time.sleep(10)
+
 
 def filename_to_format(output_file: str):
         ext = os.path.splitext(output_file)[1].lower()
@@ -48,8 +49,7 @@ def filename_to_format(output_file: str):
 @click.option('--output_file', '-o', type=click.Path(), 
               default='', help='Output path of the transcription.')
 def transcribe_audio(audio_file_path, channels: int, language: str, output_format: str, output_file: str):
-    api_key = os.getenv("SBER_SPEECH_API_KEY")
-    if api_key is None:
+    if (api_key := os.getenv('SBER_SPEECH_API_KEY')) is None:
         click.echo(click.style('Error: env variable SBER_SPEECH_API_KEY is not set', fg='red'))
         raise click.Abort
 

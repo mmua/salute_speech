@@ -1,3 +1,26 @@
+"""
+This module provides a client for interacting with the Sber Speech Recognition service. 
+
+The SberSpeechRecognition class offers methods to upload audio files, start speech recognition tasks, 
+and retrieve their results. It handles authentication and token management internally. 
+It also performs validation on audio parameters to ensure compatibility with the Sber Speech API.
+
+This module also includes utility functions for making secure HTTP requests to the Sber service, 
+taking into account the necessary SSL certificate verification.
+
+Example:
+    To use the SberSpeechRecognition class, initialize it with client credentials and 
+    use its methods to upload audio files and initiate transcription tasks:
+
+        from salute_speech.speech_recognition import SberSpeechRecognition
+
+        sr_client = SberSpeechRecognition(client_credentials='YourClientCredentials')
+        file_id = sr_client.upload_file(audio_file)
+        task = sr_client.async_recognize(file_id)
+        result = sr_client.get_task_status(task.id)
+"""
+from __future__ import annotations
+
 from time import time
 from io import FileIO
 import uuid
@@ -7,15 +30,44 @@ from salute_speech.utils.russian_certs import russian_secure_get, russian_secure
 
 class UploadError(Exception):
     """Exception raised for errors during the file upload process."""
-    pass
+
 
 class InvalidResponseError(Exception):
     """Exception raised for invalid responses received from the server."""
-    pass
+
 
 class InvalidAudioFormatError(Exception):
     """Exception raised for invalid responses received from the server."""
-    pass
+
+
+class TokenRequestError(Exception):
+    """Exception raised when the OAuth token request fails."""
+    def __init__(self, status_code, message):
+        super().__init__(f"Token request failed with status {status_code}: {message}")
+        self.status_code = status_code
+        self.message = message
+
+class TokenParsingError(Exception):
+    """Exception raised when there is an issue parsing the token response."""
+
+
+class FileUploadError(Exception):
+    """Exception raised when file upload fails."""
+
+    def __init__(self, message):
+        super().__init__(message)
+
+
+class SpeechRecognitionResponseError(Exception):
+    """Exception raised for errors within the speech recognition response."""
+    def __init__(self, message):
+        super().__init__(message)
+
+
+class TaskStatusResponseError(Exception):
+    """Exception raised for errors within the task status response."""
+    def __init__(self, message):
+        super().__init__(message)
 
 
 class SpeechRecognitionTask:
@@ -24,6 +76,22 @@ class SpeechRecognitionTask:
         self.created_at = result_data.get('created_at')
         self.updated_at = result_data.get('updated_at')
         self.status = result_data.get('status')
+
+
+class SpeechRecognitionConfig:
+    def __init__(self, hypotheses_count: int = 1, enable_profanity_filter: bool = False, 
+                 max_speech_timeout: str = "20s", channels_count: int = 2, 
+                 no_speech_timeout: str = "7s", hints: (None | dict) = None, 
+                 insight_models: (None | list) = None,
+                 speaker_separation_options: (None | dict) = None):
+        self.hypotheses_count = hypotheses_count
+        self.enable_profanity_filter = enable_profanity_filter
+        self.max_speech_timeout = max_speech_timeout
+        self.channels_count = channels_count
+        self.no_speech_timeout = no_speech_timeout
+        self.hints = hints or {}
+        self.insight_models = insight_models or []
+        self.speaker_separation_options = speaker_separation_options or {}
 
 
 class SberSpeechRecognition:
@@ -79,10 +147,15 @@ class SberSpeechRecognition:
         })
         response = russian_secure_post(url, headers=headers, data=data)
         if response.status_code != 200:
-            raise Exception(f"Failed to request auth token: {response.text}")
-        response_json = response.json()
-        self.token = response_json["access_token"]
-        self.token_expiry = int(response_json["expires_at"])
+            raise TokenRequestError(response.status_code, response.text)
+    
+        try:
+            response_json = response.json()
+            self.token = response_json["access_token"]
+            self.token_expiry = int(response_json["expires_at"])
+        except (KeyError, ValueError) as e:
+            raise TokenParsingError(f"Failed to parse token response: {e}") from e
+
         return self.token, self.token_expiry
 
     def _handle_upload_response_errors(self, response):
@@ -103,21 +176,21 @@ class SberSpeechRecognition:
         """
         Upload an audio file to the Sber Speech Recognition service.
 
-        :param audio_file_path: Path to the audio file.
-        :return: request_file_id.
+        :param audio_file: File-like object representing the audio file to be uploaded.
+        :return: request_file_id of the uploaded file.
         """
         url = self.base_url + "data:upload"
         headers = self._get_headers(raw=True)
 
         response = russian_secure_post(url, headers=headers, data=audio_file)
         if response.status_code != 200:
-            raise Exception(f"Failed to upload file: {response.text}")
+            raise FileUploadError(f"Failed to upload file: {response.text}")
         
         response_json = self._handle_upload_response_errors(response)
         return response_json['result']['request_file_id']
 
 
-    def _validate_audio_params(self, audio_encoding, sample_rate, channels_count):
+    def _validate_audio_params(self, audio_encoding: str, sample_rate: int, channels_count: int):
         """
         Validate audio parameters according to the Sber Speech API documentation.
         https://developers.sber.ru/docs/ru/salutespeech/recognition/encodings
@@ -130,7 +203,7 @@ class SberSpeechRecognition:
         if audio_encoding not in valid_encodings:
             raise ValueError(f"Invalid audio encoding: {audio_encoding}")
 
-        if audio_encoding in ['PCM_S16LE', 'ALAW', 'MULAW']:
+        if audio_encoding in set(['PCM_S16LE', 'ALAW', 'MULAW']):
             if not (8000 <= sample_rate <= 96000):
                 raise ValueError(f"Invalid sample rate for {audio_encoding}: {sample_rate}")
             if channels_count > 8:
@@ -145,10 +218,9 @@ class SberSpeechRecognition:
         if audio_encoding == 'FLAC' and channels_count > 8:
             raise ValueError(f"Too many channels for FLAC: {channels_count}")
 
-    def async_recognize(self, request_file_id, language="ru-RU", audio_encoding="PCM_S16LE", sample_rate=16000, 
-                        hypotheses_count=1, enable_profanity_filter=False, max_speech_timeout="20s", 
-                        channels_count=2, no_speech_timeout="7s", hints=None, insight_models=None, 
-                        speaker_separation_options=None):
+    def async_recognize(self, request_file_id: str, language: str = "ru-RU",
+                    audio_encoding: str = "PCM_S16LE", sample_rate: int = 16000, channels_count: int = 1,
+                    config: SpeechRecognitionConfig = SpeechRecognitionConfig()):
         """
         Transcribe audio using Sber Speech Recognition service.
 
@@ -156,14 +228,8 @@ class SberSpeechRecognition:
         :param language: Language for speech recognition.
         :param audio_encoding: Audio codec.
         :param sample_rate: Sample rate.
-        :param hypotheses_count: Number of alternative hypotheses.
-        :param enable_profanity_filter: Enable profanity filter.
-        :param max_speech_timeout: Max speech timeout.
         :param channels_count: Number of channels in multi-channel audio.
-        :param no_speech_timeout: No speech timeout.
-        :param hints: Hints for speech recognition.
-        :param insight_models: Insight models.
-        :param speaker_separation_options: Speaker separation options.
+        :param config: Salute Speech model tuning config.
         :return: Response from the server.
         """
 
@@ -171,35 +237,28 @@ class SberSpeechRecognition:
         url = self.base_url + "speech:async_recognize"
         headers = self._get_headers()
 
+        options = vars(config)
         data = {
             "options": {
                 "language": language,
                 "audio_encoding": audio_encoding,
                 "sample_rate": sample_rate,
-                "hypotheses_count": hypotheses_count,
-                "enable_profanity_filter": enable_profanity_filter,
-                "max_speech_timeout": max_speech_timeout,
                 "channels_count": channels_count,
-                "no_speech_timeout": no_speech_timeout,
-                "hints": hints or {},
-                "insight_models": insight_models or [],
-                "speaker_separation_options": speaker_separation_options or {}
+                **options
             },
             "request_file_id": request_file_id
         }
 
         response = russian_secure_post(url, headers=headers, json=data)
-
-        if response.status_code != 200:
-            raise Exception(f"Failed to initiate speech recognition: {response.text}")
+        response.raise_for_status()
 
         response_json = response.json()
         if 'status' in response_json and response_json['status'] != 200:
-            raise Exception(f"Failed to initiate speech recognition: {response.text}")
+            raise SpeechRecognitionResponseError(f"Failed to initiate speech recognition: {response.text}")
 
         return SpeechRecognitionTask(response_json.get('result'))
 
-    def get_task_status(self, task_id):
+    def get_task_status(self, task_id: str):
         """
         Retrieve the status of a speech recognition task.
 
@@ -211,13 +270,11 @@ class SberSpeechRecognition:
         headers = self._get_headers()
 
         response = russian_secure_get(url, headers=headers, params=params)
-
-        if response.status_code != 200:
-            raise Exception(f"Failed to get task status: {response.text}")
+        response.raise_for_status()
 
         response_json = response.json()
         if 'status' in response_json and response_json['status'] != 200:
-            raise Exception(f"Failed to get task status: {response.text}")
+            raise TaskStatusResponseError(f"Failed to get task status: {response.text}")
 
         return response_json.get('result')
 
@@ -226,16 +283,13 @@ class SberSpeechRecognition:
         Download the result file from the Sber Speech Recognition service.
 
         :param response_file_id: The ID of the file to download.
-        :param output_path: Path where the downloaded file will be saved.
         """
         url = self.base_url + "data:download"
         params = {'response_file_id': response_file_id}
         headers = self._get_headers()
 
         response = russian_secure_get(url, headers=headers, params=params)
-
-        if response.status_code != 200:
-            raise Exception(f"Failed to download the file: {response.text}")
+        response.raise_for_status()
 
         # Save the file content to output_file
         return response.text

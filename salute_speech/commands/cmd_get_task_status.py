@@ -9,9 +9,8 @@ _ = load_dotenv(find_dotenv())
 @click.command()
 @click.argument('task_id', nargs=1)
 def get_task_status(task_id: str):
-    api_key = os.getenv("SBER_SPEECH_API_KEY")
-    if api_key is None:
-        click.echo(click.style(f'Error: env variable SBER_SPEECH_API_KEY is not set', fg='red'))
+    if (api_key := os.getenv('SBER_SPEECH_API_KEY')) is None:
+        click.echo(click.style('Error: env variable SBER_SPEECH_API_KEY is not set', fg='red'))
         raise click.Abort
 
     sr = SberSpeechRecognition(api_key)
