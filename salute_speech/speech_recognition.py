@@ -80,14 +80,12 @@ class SpeechRecognitionTask:
 
 class SpeechRecognitionConfig:
     def __init__(self, hypotheses_count: int = 1, enable_profanity_filter: bool = False, 
-                 max_speech_timeout: str = "20s", channels_count: int = 2, 
-                 no_speech_timeout: str = "7s", hints: (None | dict) = None, 
-                 insight_models: (None | list) = None,
+                 max_speech_timeout: str = "20s", no_speech_timeout: str = "7s", 
+                 hints: (None | dict) = None, insight_models: (None | list) = None,
                  speaker_separation_options: (None | dict) = None):
         self.hypotheses_count = hypotheses_count
         self.enable_profanity_filter = enable_profanity_filter
         self.max_speech_timeout = max_speech_timeout
-        self.channels_count = channels_count
         self.no_speech_timeout = no_speech_timeout
         self.hints = hints or {}
         self.insight_models = insight_models or []

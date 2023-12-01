@@ -4,6 +4,7 @@ from unittest.mock import patch, MagicMock
 from salute_speech.speech_recognition import SberSpeechRecognition
 import datetime
 from time import time
+from salute_speech.utils.const import SALUTE_SPEECH_HTTP_TIMEOUT
 
 from salute_speech.utils.package import get_config_path
 
@@ -37,6 +38,7 @@ class TestSberSpeechRecognition(unittest.TestCase):
         # Assert the request was called correctly
         mock_post.assert_called_with(
             "https://smartspeech.sber.ru/rest/v1/data:upload",
+            timeout=SALUTE_SPEECH_HTTP_TIMEOUT,
             headers={"Authorization": f"Bearer {self.sber_speech.token}"},
             data=dummy_file,
             verify=get_config_path('russian.pem')
