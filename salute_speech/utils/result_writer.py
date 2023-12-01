@@ -10,7 +10,7 @@
 # to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
 # copies of the Software, and to permit persons to whom the Software is
 # furnished to do so, subject to the following conditions:
-# 
+#
 # The above copyright notice and this permission notice shall be included in all
 # copies or substantial portions of the Software.
 #
@@ -24,7 +24,7 @@ import json
 import sys
 import zlib
 from typing import Callable, Optional, TextIO
-    
+
 
 if (system_encoding := sys.getdefaultencoding()) != 'utf-8':
 
@@ -131,7 +131,6 @@ class SubtitlesWriter(ResultWriter):
         max_line_width = max_line_width or 1000
         max_words_per_line = max_words_per_line or 1000
 
-  
         for segment in result:
             segment_start = self.format_timestamp(float(segment['results'][0]['start'].replace('s', '')))
             segment_end = self.format_timestamp(float(segment['results'][0]["end"].replace('s', '')))

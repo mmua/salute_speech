@@ -1,15 +1,15 @@
 """
-This module provides a client for interacting with the Sber Speech Recognition service. 
+This module provides a client for interacting with the Sber Speech Recognition service.
 
-The SberSpeechRecognition class offers methods to upload audio files, start speech recognition tasks, 
-and retrieve their results. It handles authentication and token management internally. 
+The SberSpeechRecognition class offers methods to upload audio files, start speech recognition tasks,
+and retrieve their results. It handles authentication and token management internally.
 It also performs validation on audio parameters to ensure compatibility with the Sber Speech API.
 
-This module also includes utility functions for making secure HTTP requests to the Sber service, 
+This module also includes utility functions for making secure HTTP requests to the Sber service,
 taking into account the necessary SSL certificate verification.
 
 Example:
-    To use the SberSpeechRecognition class, initialize it with client credentials and 
+    To use the SberSpeechRecognition class, initialize it with client credentials and
     use its methods to upload audio files and initiate transcription tasks:
 
         from salute_speech.speech_recognition import SberSpeechRecognition
@@ -47,6 +47,7 @@ class TokenRequestError(Exception):
         self.status_code = status_code
         self.message = message
 
+
 class TokenParsingError(Exception):
     """Exception raised when there is an issue parsing the token response."""
 
@@ -79,8 +80,8 @@ class SpeechRecognitionTask:
 
 
 class SpeechRecognitionConfig:
-    def __init__(self, hypotheses_count: int = 1, enable_profanity_filter: bool = False, 
-                 max_speech_timeout: str = "20s", no_speech_timeout: str = "7s", 
+    def __init__(self, hypotheses_count: int = 1, enable_profanity_filter: bool = False,
+                 max_speech_timeout: str = "20s", no_speech_timeout: str = "7s",
                  hints: (None | dict) = None, insight_models: (None | list) = None,
                  speaker_separation_options: (None | dict) = None):
         self.hypotheses_count = hypotheses_count
@@ -105,8 +106,7 @@ class SberSpeechRecognition:
         self.token = None
         self.token_expiry = None
 
-
-    def _get_headers(self, raw: bool=False) -> dict:
+    def _get_headers(self, raw: bool = False) -> dict:
         """
         Generate the headers for the request.
 
@@ -115,9 +115,9 @@ class SberSpeechRecognition:
         """
         if self.token_expiry is None or time() * 1000 > self.token_expiry:  # token_expiry in milliseconds
             self._get_token()
-        
+
         headers = {
-            "Authorization": f"Bearer {self.token}"    
+            "Authorization": f"Bearer {self.token}"
         }
         if not raw:
             headers["Content-Type"] = "application/json"
@@ -146,7 +146,7 @@ class SberSpeechRecognition:
         response = russian_secure_post(url, headers=headers, data=data)
         if response.status_code != 200:
             raise TokenRequestError(response.status_code, response.text)
-    
+
         try:
             response_json = response.json()
             self.token = response_json["access_token"]
@@ -163,7 +163,8 @@ class SberSpeechRecognition:
 
         response_json = response.json()
         if response_json.get('status') != 200:
-            raise UploadError(f"Failed to upload file, Response Status: {response_json.get('status')}, Response: {response.text}")
+            raise UploadError("Failed to upload file, "
+                              f"Response Status: {response_json.get('status')}, Response: {response.text}")
 
         if 'result' not in response_json or 'request_file_id' not in response_json['result']:
             raise InvalidResponseError(f"Unexpected response format: {response_json}")
@@ -183,10 +184,9 @@ class SberSpeechRecognition:
         response = russian_secure_post(url, headers=headers, data=audio_file)
         if response.status_code != 200:
             raise FileUploadError(f"Failed to upload file: {response.text}")
-        
+
         response_json = self._handle_upload_response_errors(response)
         return response_json['result']['request_file_id']
-
 
     def _validate_audio_params(self, audio_encoding: str, sample_rate: int, channels_count: int):
         """
@@ -217,8 +217,8 @@ class SberSpeechRecognition:
             raise ValueError(f"Too many channels for FLAC: {channels_count}")
 
     def async_recognize(self, request_file_id: str, language: str = "ru-RU",
-                    audio_encoding: str = "PCM_S16LE", sample_rate: int = 16000, channels_count: int = 1,
-                    config: SpeechRecognitionConfig = SpeechRecognitionConfig()):
+                        audio_encoding: str = "PCM_S16LE", sample_rate: int = 16000, channels_count: int = 1,
+                        config: SpeechRecognitionConfig = SpeechRecognitionConfig()):
         """
         Transcribe audio using Sber Speech Recognition service.
 
