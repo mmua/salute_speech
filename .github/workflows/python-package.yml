@@ -31,6 +31,8 @@ jobs:
         if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
         # install package before testing
         pip install .
+        # ensure env variables
+        cp .env.example .env
     - name: Lint with flake8
       run: |
         # stop the build if there are Python syntax errors or undefined names
