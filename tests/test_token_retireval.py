@@ -2,6 +2,7 @@ import unittest
 from unittest.mock import patch, MagicMock
 from urllib.parse import urlencode
 from salute_speech.speech_recognition import SberSpeechRecognition
+from salute_speech.utils.const import SALUTE_SPEECH_HTTP_TIMEOUT
 from salute_speech.utils.package import get_config_path
 
 
@@ -29,6 +30,7 @@ class TestSberSpeechRecognitionTokenRetrieval(unittest.TestCase):
         mock_post.assert_called_with(
             "https://ngw.devices.sberbank.ru:9443/api/v2/oauth",
             verify=get_config_path('russian.pem'),
+            timeout=SALUTE_SPEECH_HTTP_TIMEOUT,
             headers={
                 "Authorization": f"Basic {self.client_credentials}",
                 "RqUID": request_id,  # This should match the value in your class

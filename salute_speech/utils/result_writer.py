@@ -16,18 +16,17 @@
 #
 # Modifications made by Maxim Moroz on 2023.11.28
 
+
+# pylint: disable=all
+
 from io import FileIO
 import json
-import os
-import re
 import sys
 import zlib
 from typing import Callable, Optional, TextIO
     
 
-system_encoding = sys.getdefaultencoding()
-
-if system_encoding != "utf-8":
+if (system_encoding := sys.getdefaultencoding()) != 'utf-8':
 
     def make_safe(string):
         # replaces any character not representable using the system default encoding with an '?',
@@ -50,8 +49,7 @@ def str2bool(string):
     str2val = {"True": True, "False": False}
     if string in str2val:
         return str2val[string]
-    else:
-        raise ValueError(f"Expected one of {set(str2val.keys())}, got {string}")
+    raise ValueError(f"Expected one of {set(str2val.keys())}, got {string}")
 
 
 def optional_int(string):
@@ -130,7 +128,6 @@ class SubtitlesWriter(ResultWriter):
         max_line_count = max_line_count or options.get("max_line_count")
         highlight_words = highlight_words or options.get("highlight_words", False)
         max_words_per_line = max_words_per_line or options.get("max_words_per_line")
-        preserve_segments = max_line_count is None or max_line_width is None
         max_line_width = max_line_width or 1000
         max_words_per_line = max_words_per_line or 1000
 
@@ -147,6 +144,11 @@ class SubtitlesWriter(ResultWriter):
             always_include_hours=self.always_include_hours,
             decimal_marker=self.decimal_marker,
         )
+
+    def write_result(
+        self, result: list, file: TextIO, options: Optional[dict] = None, **kwargs
+    ):
+        raise NotImplementedError
 
 
 class WriteVTT(SubtitlesWriter):
