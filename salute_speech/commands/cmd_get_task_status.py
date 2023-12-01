@@ -16,4 +16,3 @@ def get_task_status(task_id: str):
     sr = SberSpeechRecognition(api_key)
     response = sr.get_task_status(task_id)
     print(response)
-

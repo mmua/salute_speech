@@ -45,6 +45,7 @@ class TestSberSpeechRecognitionTokenRetrieval(unittest.TestCase):
         self.assertEqual(self.sber_speech.token, "test_access_token")
         self.assertTrue(self.sber_speech.token_expiry is not None)
 
+
 # Run the tests
 if __name__ == '__main__':
     unittest.main()

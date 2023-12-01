@@ -17,4 +17,3 @@ def upload_audio(audio_file_path: click.Path(exists=True)):
     with open(audio_file_path, "rb") as audio_file:
         file_id = sr.upload_file(audio_file)
         click.echo(json.dumps(file_id))
-
