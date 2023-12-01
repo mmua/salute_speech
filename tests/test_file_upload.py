@@ -1,9 +1,8 @@
 import unittest
 from io import BytesIO
 from unittest.mock import patch, MagicMock
-from salute_speech.speech_recognition import SberSpeechRecognition
-import datetime
 from time import time
+from salute_speech.speech_recognition import SberSpeechRecognition
 from salute_speech.utils.const import SALUTE_SPEECH_HTTP_TIMEOUT
 
 from salute_speech.utils.package import get_config_path
