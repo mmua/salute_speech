@@ -2,8 +2,6 @@ import unittest
 from time import time
 from unittest.mock import patch, MagicMock
 from salute_speech.speech_recognition import SberSpeechRecognition, SpeechRecognitionTask
-from salute_speech.utils.const import SALUTE_SPEECH_HTTP_TIMEOUT
-from salute_speech.utils.russian_certs import russian_secure_get, russian_secure_post
 
 
 class TestSberSpeechRecognitionAsyncRecognize(unittest.TestCase):
