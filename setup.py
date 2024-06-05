@@ -11,7 +11,7 @@ with open('README.md', encoding="utf-8") as readme_file:
 requirements = [
     'Click==8.1.7',
     'python-dotenv==1.0.0',
-    'requests==2.31.0',
+    'requests==2.32.0',
     'pydub==0.25.1'
 ]
 
