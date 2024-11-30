@@ -17,7 +17,7 @@ requirements = [
 
 setup(
     name='salute_speech',
-    version='1.1.1',
+    version='1.2.0',
     description="Sber Salute Speech API",
     long_description=readme,
     author="Maxim Moroz",
