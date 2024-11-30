@@ -31,6 +31,10 @@ from dataclasses import dataclass
 from typing import Optional, BinaryIO
 import asyncio
 from salute_speech.utils.russian_certs import russian_secure_get, russian_secure_post
+from dataclasses import dataclass
+from typing import Optional, BinaryIO
+import asyncio
+from time import sleep
 
 
 class UploadError(Exception):
