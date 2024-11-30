@@ -1,7 +1,5 @@
 # Sber Salute Speech Python API
 
-Here's a documentation section describing how to use the simplified Speech Recognition client:
-
 ## Speech Recognition API
 
 The `SaluteSpeechClient` provides an easy-to-use interface for transcribing audio files, similar to OpenAI's Whisper API but with async support.
@@ -15,12 +13,12 @@ pip install salute_speech
 ### Quick Start
 
 ```python
-from simple_speech_client import SimpleSpeechClient
+from salute_speech.speech_recognition import SaluteSpeechClient
 import asyncio
 
 async def main():
     # Initialize the client
-    client = SimpleSpeechClient(client_credentials="your_credentials_here")
+    client = SaluteSpeechClient(client_credentials="your_credentials_here")
     
     # Open and transcribe an audio file
     with open("audio.mp3", "rb") as audio_file:
@@ -36,7 +34,7 @@ asyncio.run(main())
 
 ### API Reference
 
-#### SimpleSpeechClient
+#### SaluteSpeechClient
 
 ##### `client.audio.transcriptions.create()`
 
