@@ -21,11 +21,17 @@ Example:
 """
 from __future__ import annotations
 
+import json
+import logging
 from time import time
 from io import FileIO
 import uuid
 from urllib.parse import urlencode
 from salute_speech.utils.russian_certs import russian_secure_get, russian_secure_post
+from dataclasses import dataclass
+from typing import Optional, BinaryIO
+import asyncio
+from time import sleep
 
 
 class UploadError(Exception):
@@ -291,3 +297,130 @@ class SberSpeechRecognition:
 
         # Save the file content to output_file
         return response.text
+
+
+@dataclass
+class TranscriptionResponse:
+    """Response object similar to OpenAI's API response"""
+    text: str
+    status: str
+    task_id: str
+
+
+# Configure logging
+logging.basicConfig(
+    level=logging.DEBUG,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger('SaluteSpeechClient')
+
+def _parse_result(json_str: str) -> str:
+    """Extract normalized text from JSON response"""
+    try:
+        data = json.loads(json_str)
+        return data[0]['results'][0]['normalized_text']
+    except Exception as e:
+        logger.error(f"Error parsing result: {e}")
+        raise
+
+class SaluteSpeechClient:
+    """A simplified interface for Sber Speech Recognition, similar to OpenAI's Whisper API"""
+    
+    def __init__(self, client_credentials: str):
+        """Initialize the client with credentials"""
+        logger.debug("Initializing SimpleSpeechClient")
+        self.client = SberSpeechRecognition(client_credentials=client_credentials)
+        self.audio = self.Audio(self.client)
+
+    class Audio:
+        def __init__(self, client: SberSpeechRecognition):
+            self.client = client
+            self.transcriptions = self.Transcriptions(client)
+
+        class Transcriptions:
+            def __init__(self, client: SberSpeechRecognition):
+                self.client = client
+
+            async def create(
+                self,
+                file: BinaryIO,
+                model: str = "general",
+                language: str = "ru-RU",
+                response_format: str = "text",
+                prompt: Optional[str] = None,
+                temperature: float = 0.0,
+                poll_interval: float = 1.0
+            ) -> TranscriptionResponse:
+                """Create a transcription for the given audio file."""
+                try:
+                    logger.debug("Starting transcription process")
+                    
+                    # First, ensure we have a valid token
+                    logger.debug("Getting authentication token")
+                    self.client._get_token()
+                    logger.debug("Token obtained successfully")
+
+                    # Configure recognition
+                    logger.debug("Configuring recognition parameters")
+                    config = SpeechRecognitionConfig(
+                        hints={"words": [prompt]} if prompt else None
+                    )
+
+                    # Upload the file
+                    logger.debug("Uploading audio file")
+                    file_id = self.client.upload_file(file)
+                    logger.debug(f"File uploaded successfully. File ID: {file_id}")
+
+                    # Start async recognition
+                    logger.debug("Starting async recognition")
+                    task = self.client.async_recognize(
+                        request_file_id=file_id,
+                        language=language,
+                        config=config
+                    )
+                    logger.debug(f"Recognition task created. Task ID: {task.id}")
+
+                    # Poll for results
+                    attempt = 0
+                    while True:
+                        attempt += 1
+                        try:
+                            logger.debug(f"Polling attempt {attempt} for task {task.id}")
+                            result = self.client.get_task_status(task.id)
+                            status = result.get('status')
+                            logger.debug(f"Current status: {status}")
+
+                            if status == 'ERROR':
+                                error_msg = result.get('error_message', 'Unknown error')
+                                logger.error(f"Transcription failed: {error_msg}")
+                                raise Exception(f"Transcription failed: {error_msg}")
+                            
+                            if status == 'DONE':
+                                logger.debug("Task completed successfully")
+                                if response_format == "text":
+                                    response_file_id = result.get('response_file_id')
+                                    logger.debug(f"Downloading result file: {response_file_id}")
+                                    raw_result = self.client.download_result(response_file_id)
+                                    text = _parse_result(raw_result)
+                                    logger.debug("Result downloaded successfully")
+                                    return TranscriptionResponse(
+                                        text=text,
+                                        status=status,
+                                        task_id=task.id
+                                    )
+                                else:
+                                    raise ValueError(f"Unsupported response format: {response_format}")
+
+                            logger.debug(f"Waiting {poll_interval} seconds before next poll")
+                            await asyncio.sleep(poll_interval)
+
+                        except TaskStatusResponseError as e:
+                            logger.error(f"Error checking task status: {str(e)}")
+                            raise Exception(f"Error checking task status: {str(e)}")
+                        except Exception as e:
+                            logger.error(f"Unexpected error: {str(e)}", exc_info=True)
+                            raise
+
+                except Exception as e:
+                    logger.error(f"Error in transcription process: {str(e)}", exc_info=True)
+                    raise
