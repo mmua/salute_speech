@@ -1,0 +1,41 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "salute_speech"
+version = "1.2.2"
+description = "Sber Salute Speech API"
+readme = "README.md"
+authors = [
+    {name = "Maxim Moroz", email = "maxim.moroz@gmail.com"},
+]
+license = {file = "LICENSE"}
+classifiers = [
+    "Intended Audience :: Developers",
+    "Natural Language :: English",
+    "Programming Language :: Python :: 3.9",
+]
+keywords = ["speech"]
+requires-python = ">=3.8"
+dependencies = [
+    "Click>=8.1.7",
+    "python-dotenv>=1.0.1",
+    "requests>=2.32.3",
+    "pydub>=0.25.1",
+]
+
+[project.urls]
+Homepage = "https://github.com/mmua/salute_speech"
+Repository = "https://github.com/mmua/salute_speech.git"
+
+[project.scripts]
+salute_speech = "salute_speech:cli"
+
+[tool.setuptools]
+packages = ["salute_speech"]
+include-package-data = true
+zip-safe = false
+
+[tool.setuptools.package-data]
+salute_speech = ["conf/*"]

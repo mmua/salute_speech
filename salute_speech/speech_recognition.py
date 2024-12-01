@@ -27,6 +27,9 @@ from time import time
 from io import FileIO
 import uuid
 from urllib.parse import urlencode
+from dataclasses import dataclass
+from typing import Optional, BinaryIO
+import asyncio
 from salute_speech.utils.russian_certs import russian_secure_get, russian_secure_post
 from dataclasses import dataclass
 from typing import Optional, BinaryIO
@@ -320,7 +323,7 @@ def _parse_result(json_str: str) -> str:
         data = json.loads(json_str)
         return data[0]['results'][0]['normalized_text']
     except Exception as e:
-        logger.error(f"Error parsing result: {e}")
+        logger.error("Error parsing result: %s", e)
         raise
 
 class SaluteSpeechClient:
@@ -369,7 +372,7 @@ class SaluteSpeechClient:
                     # Upload the file
                     logger.debug("Uploading audio file")
                     file_id = self.client.upload_file(file)
-                    logger.debug(f"File uploaded successfully. File ID: {file_id}")
+                    logger.debug("File uploaded successfully. File ID: %s", file_id)
 
                     # Start async recognition
                     logger.debug("Starting async recognition")
@@ -378,28 +381,28 @@ class SaluteSpeechClient:
                         language=language,
                         config=config
                     )
-                    logger.debug(f"Recognition task created. Task ID: {task.id}")
+                    logger.debug("Recognition task created. Task ID: %s", task.id)
 
                     # Poll for results
                     attempt = 0
                     while True:
                         attempt += 1
                         try:
-                            logger.debug(f"Polling attempt {attempt} for task {task.id}")
+                            logger.debug("Polling attempt %s for task %s", attempt, task.id)
                             result = self.client.get_task_status(task.id)
                             status = result.get('status')
-                            logger.debug(f"Current status: {status}")
+                            logger.debug("Current status: %s", status)
 
                             if status == 'ERROR':
                                 error_msg = result.get('error_message', 'Unknown error')
-                                logger.error(f"Transcription failed: {error_msg}")
+                                logger.error("Transcription failed: %s", error_msg)
                                 raise Exception(f"Transcription failed: {error_msg}")
                             
                             if status == 'DONE':
                                 logger.debug("Task completed successfully")
                                 if response_format == "text":
                                     response_file_id = result.get('response_file_id')
-                                    logger.debug(f"Downloading result file: {response_file_id}")
+                                    logger.debug("Downloading result file: %s", response_file_id)
                                     raw_result = self.client.download_result(response_file_id)
                                     text = _parse_result(raw_result)
                                     logger.debug("Result downloaded successfully")
@@ -411,16 +414,16 @@ class SaluteSpeechClient:
                                 else:
                                     raise ValueError(f"Unsupported response format: {response_format}")
 
-                            logger.debug(f"Waiting {poll_interval} seconds before next poll")
+                            logger.debug("Waiting %s seconds before next poll", poll_interval)
                             await asyncio.sleep(poll_interval)
 
                         except TaskStatusResponseError as e:
-                            logger.error(f"Error checking task status: {str(e)}")
-                            raise Exception(f"Error checking task status: {str(e)}")
+                            logger.error("Error checking task status: %s", str(e))
+                            raise Exception(f"Error checking task status: {str(e)}") from e
                         except Exception as e:
-                            logger.error(f"Unexpected error: {str(e)}", exc_info=True)
+                            logger.error("Unexpected error: %s", str(e), exc_info=True)
                             raise
 
                 except Exception as e:
-                    logger.error(f"Error in transcription process: {str(e)}", exc_info=True)
+                    logger.error("Error in transcription process: %s", str(e), exc_info=True)
                     raise
