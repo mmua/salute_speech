@@ -34,8 +34,110 @@ from salute_speech.utils.russian_certs import russian_secure_get, russian_secure
 from dataclasses import dataclass
 from typing import Optional, BinaryIO
 import asyncio
-from time import sleep
 
+
+import tempfile
+import os
+from pydub.utils import mediainfo
+
+def _detect_audio_params(file: BinaryIO) -> tuple[str, int, int]:
+    """
+    Detect audio format parameters using pydub's mediainfo.
+    Returns tuple of (audio_encoding, sample_rate, channels_count).
+    
+    Args:
+        file: Audio file-like object
+        
+    Returns:
+        tuple: (audio_encoding, sample_rate, channels_count)
+        
+    Raises:
+        ValueError: If audio format is not supported
+    """
+    # Save current position
+    current_pos = file.tell()
+    file.seek(0)
+    
+    try:
+        # Create a temporary file to handle the audio data
+        with tempfile.NamedTemporaryFile(suffix='.audio', delete=False) as temp_file:
+            temp_file.write(file.read())
+            temp_path = temp_file.name
+        
+        try:
+            # Get audio info using mediainfo
+            info = mediainfo(temp_path)
+            
+            # Extract basic parameters
+            audio_encoding = info['codec_name'].upper()
+            sample_rate = int(info['sample_rate'])
+            channels_count = int(info['channels'])
+            
+            # Map common codec names to Sber formats
+            format_map = {
+                'MP3': 'MP3',
+                'OPUS': 'OPUS',
+                'FLAC': 'FLAC',
+                'PCM': 'PCM_S16LE',
+                'ALAW': 'ALAW',
+                'MULAW': 'MULAW',
+                'WAV': 'PCM_S16LE'
+            }
+            
+            # Map the codec to Sber format
+            audio_encoding = format_map.get(audio_encoding, 'PCM_S16LE')
+            
+            # Validate parameters according to Sber's requirements
+            if audio_encoding in ['PCM_S16LE', 'ALAW', 'MULAW']:
+                if not (8000 <= sample_rate <= 96000):
+                    logger.warning(
+                        f"Sample rate {sample_rate}Hz out of range for {audio_encoding}, "
+                        "resampling to 16000Hz"
+                    )
+                    sample_rate = 16000
+                if channels_count > 8:
+                    logger.warning(
+                        f"Too many channels ({channels_count}) for {audio_encoding}, "
+                        "using first 8 channels"
+                    )
+                    channels_count = 8
+                    
+            elif audio_encoding == 'OPUS':
+                if channels_count != 1:
+                    logger.warning("OPUS requires mono audio, using first channel")
+                    channels_count = 1
+                    
+            elif audio_encoding == 'MP3':
+                if channels_count > 2:
+                    logger.warning(
+                        f"Too many channels ({channels_count}) for MP3, using first 2 channels"
+                    )
+                    channels_count = 2
+                    
+            elif audio_encoding == 'FLAC':
+                if channels_count > 8:
+                    logger.warning(
+                        f"Too many channels ({channels_count}) for FLAC, using first 8 channels"
+                    )
+                    channels_count = 8
+            
+            logger.debug(
+                f"Detected audio parameters: {audio_encoding}, "
+                f"{sample_rate}Hz, {channels_count} channels"
+            )
+            
+            return audio_encoding, sample_rate, channels_count
+            
+        finally:
+            # Clean up temporary file
+            try:
+                os.unlink(temp_path)
+            except Exception as e:
+                logger.warning(f"Failed to remove temporary file {temp_path}: {e}")
+                
+    finally:
+        # Restore original file position
+        file.seek(current_pos)
 
 class UploadError(Exception):
     """Exception raised for errors during the file upload process."""
@@ -311,10 +413,6 @@ class TranscriptionResponse:
 
 
 # Configure logging
-logging.basicConfig(
-    level=logging.DEBUG,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
 logger = logging.getLogger('SaluteSpeechClient')
 
 def _parse_result(json_str: str) -> str:
@@ -351,13 +449,16 @@ class SaluteSpeechClient:
                 language: str = "ru-RU",
                 response_format: str = "text",
                 prompt: Optional[str] = None,
-                temperature: float = 0.0,
                 poll_interval: float = 1.0
             ) -> TranscriptionResponse:
                 """Create a transcription for the given audio file."""
                 try:
                     logger.debug("Starting transcription process")
-                    
+
+                    # Detect audio format parameters
+                    audio_encoding, sample_rate, channels_count = _detect_audio_params(file)
+                    logger.debug(f"Detected audio params: {audio_encoding}, {sample_rate}Hz, {channels_count} channels")    
+
                     # First, ensure we have a valid token
                     logger.debug("Getting authentication token")
                     self.client._get_token()
@@ -379,6 +480,9 @@ class SaluteSpeechClient:
                     task = self.client.async_recognize(
                         request_file_id=file_id,
                         language=language,
+                        audio_encoding=audio_encoding,
+                        sample_rate=sample_rate,
+                        channels_count=channels_count,
                         config=config
                     )
                     logger.debug("Recognition task created. Task ID: %s", task.id)
