@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "salute_speech"
-version = "1.2.1"
+version = "1.2.2"
 description = "Sber Salute Speech API"
 readme = "README.md"
 authors = [
@@ -19,10 +19,10 @@ classifiers = [
 keywords = ["speech"]
 requires-python = ">=3.8"
 dependencies = [
-    "Click==8.1.7",
-    "python-dotenv==1.0.0",
-    "requests==2.32.0",
-    "pydub==0.25.1",
+    "Click>=8.1.7",
+    "python-dotenv>=1.0.1",
+    "requests>=2.32.3",
+    "pydub>=0.25.1",
 ]
 
 [project.urls]
