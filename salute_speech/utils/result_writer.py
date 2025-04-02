@@ -23,6 +23,7 @@ from io import FileIO
 import json
 import sys
 import zlib
+import os
 from typing import Callable, Optional, TextIO
 
 
@@ -220,3 +221,24 @@ def get_writer(
     }
 
     return writers[output_format](output_file)
+
+
+def filename_to_format(output_file: str) -> str:
+    """
+    Infer output format from file extension.
+
+    Args:
+        output_file: Path to the output file
+
+    Returns:
+        str: Output format (txt, vtt, srt, tsv, or json)
+    """
+    ext = os.path.splitext(output_file)[1].lower()
+    format_from_ext = {
+        '.txt': 'txt',
+        '.vtt': 'vtt',
+        '.srt': 'srt',
+        '.tsv': 'tsv',
+        '.json': 'json'
+    }
+    return format_from_ext.get(ext, 'txt')  # Default to 'txt' if extension is not recognized

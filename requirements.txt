@@ -1,4 +1,6 @@
-Click==8.1.7
-python-dotenv==1.0.1
-requests==2.32.3
-pydub==0.25.1
+Click>=8.1.7
+python-dotenv>=1.0.1
+requests>=2.32.3
+pydub>=0.25.1
+setuptools>=69.2.0
+numpy>=1.20.0

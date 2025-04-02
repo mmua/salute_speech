@@ -1,43 +1,53 @@
-import json
 import os
 import sys
-import time
+import asyncio
 import click
 from dotenv import load_dotenv, find_dotenv
-from salute_speech.speech_recognition import SberSpeechRecognition, TaskStatusResponseError
-from salute_speech.utils.audio import get_audio_params
-from salute_speech.utils.result_writer import get_writer
-
+from salute_speech.speech_recognition import SaluteSpeechClient
+from salute_speech.utils.audio import AudioValidator
+from salute_speech.utils.result_writer import get_writer, filename_to_format
 
 _ = load_dotenv(find_dotenv())
 
 
-def polling_get_result_file_id(sr: SberSpeechRecognition, task_id):
-    # Polling loop
-    while True:
-        task_status = sr.get_task_status(task_id)
-        if task_status['status'] == 'ERROR':
-            # Handle error
-            click.echo("An error occurred during transcription.", err=True)
-            raise TaskStatusResponseError("Failed to transcribe file: " + task_id + "\nError" + task_status['error'])
+async def transcribe_audio_async(audio_file_path, channels: int, language: str, output_format: str, output_file: str):
+    if (api_key := os.getenv('SBER_SPEECH_API_KEY')) is None:
+        click.echo(click.style('Error: env variable SBER_SPEECH_API_KEY is not set', fg='red'))
+        raise click.Abort
 
-        if task_status['status'] == 'DONE':
-            return task_status['response_file_id']
+    client = SaluteSpeechClient(api_key)
 
-        time.sleep(10)
+    with open(audio_file_path, "rb") as audio_file:
+        # Validate audio parameters
+        _, _, channels_count = AudioValidator.detect_and_validate(audio_file)
+        if channels_count != channels:
+            click.echo(click.style(
+                f'Error: unexpected audio channels number - {channels_count}. '
+                '1 channel is recommended since Salute Speech transcribes each channel independently.',
+                fg='red'))
+            raise click.Abort
 
+        # Create transcription
+        response = await client.audio.transcriptions.create(
+            file=audio_file,
+            language=language
+        )
 
-def filename_to_format(output_file: str):
-    ext = os.path.splitext(output_file)[1].lower()
-    format_from_ext = {
-        '.txt': 'txt',
-        '.vtt': 'vtt',
-        '.srt': 'srt',
-        '.tsv': 'tsv',
-        '.json': 'json'
-    }
-    output_format = format_from_ext.get(ext, 'txt')  # Default to 'txt' if extension is not recognized
-    return output_format
+        # Infer format from output file if necessary
+        if not output_format and output_file:
+            output_format = filename_to_format(output_file)
+
+        if not output_format:
+            output_format = 'txt'
+
+        # Write output
+        if output_file:
+            with open(output_file, "w", encoding="utf-8") as f:
+                writer = get_writer(output_format, f)
+                writer(response.text)
+        else:
+            writer = get_writer(output_format, sys.stdout)
+            writer(response.text)
 
 
 @click.command()
@@ -50,41 +60,11 @@ def filename_to_format(output_file: str):
 @click.option('--output_file', '-o', type=click.Path(),
               default='', help='Output path of the transcription.')
 def transcribe_audio(audio_file_path, channels: int, language: str, output_format: str, output_file: str):
-    if (api_key := os.getenv('SBER_SPEECH_API_KEY')) is None:
-        click.echo(click.style('Error: env variable SBER_SPEECH_API_KEY is not set', fg='red'))
-        raise click.Abort
-
-    audio_encoding, sample_rate, channels_count = get_audio_params(audio_file_path)
-    if channels_count != channels:
-        click.echo(click.style('Error: unexpected audio channels number - {channels_count}.'
-                               '1 channel is recommended since Salute Speech transcribes each channel independently.',
-                               fg='red'))
-        raise click.Abort
-
-    sr = SberSpeechRecognition(api_key)
-
-    with open(audio_file_path, "rb") as audio_file:
-        file_id = sr.upload_file(audio_file)
-
-    transcription_task = sr.async_recognize(file_id, audio_encoding=audio_encoding, sample_rate=sample_rate,
-                                            channels_count=channels_count, language=language)
-
-    result_file_id = polling_get_result_file_id(sr, transcription_task.id)
-
-    transcript_data = sr.download_result(result_file_id)
-    transcript = json.loads(transcript_data)
-
-    # Infer format from output file if necessary
-    if not output_format and output_file:
-        output_format = filename_to_format(output_file)
-
-    if not output_format:
-        output_format = 'txt'
-
-    if output_file:
-        with open(output_file, "w", encoding="utf-8") as f:
-            writer = get_writer(output_format, f)
-            writer(transcript)
-    else:
-        writer = get_writer(output_format, sys.stdout)
-        writer(transcript)
+    """Transcribe audio file using Sber Speech Recognition."""
+    asyncio.run(transcribe_audio_async(
+        audio_file_path=audio_file_path,
+        channels=channels,
+        language=language,
+        output_format=output_format,
+        output_file=output_file
+    ))

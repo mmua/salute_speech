@@ -1,185 +1,83 @@
 """
-This module provides a client for interacting with the Sber Speech Recognition service.
+Sber Salute Speech Recognition API Client
 
-The SberSpeechRecognition class offers methods to upload audio files, start speech recognition tasks,
-and retrieve their results. It handles authentication and token management internally.
-It also performs validation on audio parameters to ensure compatibility with the Sber Speech API.
+This module provides a comprehensive client for the Sber Salute Speech Recognition service,
+offering both a low-level API (SberSpeechRecognition) and a high-level, OpenAI Whisper-like
+interface (SaluteSpeechClient) for easy integration.
 
-This module also includes utility functions for making secure HTTP requests to the Sber service,
-taking into account the necessary SSL certificate verification.
+Features:
+- Automatic audio format detection and validation
+- Secure authentication and token management
+- Asynchronous API for better performance
+- Comprehensive error handling
+- Support for multiple audio formats (MP3, WAV, FLAC, OPUS, etc.)
 
-Example:
-    To use the SberSpeechRecognition class, initialize it with client credentials and
-    use its methods to upload audio files and initiate transcription tasks:
+The module handles all the complexities of interacting with the Sber API, including:
+- Audio parameter validation
+- Token refresh and management
+- Secure HTTP requests with proper certificate verification
+- Task status polling and result retrieval
 
-        from salute_speech.speech_recognition import SberSpeechRecognition
+Basic Usage:
+    # Using the OpenAI-like interface (recommended)
+    from salute_speech.speech_recognition import SaluteSpeechClient
+    import asyncio
 
-        sr_client = SberSpeechRecognition(client_credentials='YourClientCredentials')
-        file_id = sr_client.upload_file(audio_file)
-        task = sr_client.async_recognize(file_id)
-        result = sr_client.get_task_status(task.id)
+    async def transcribe():
+        client = SaluteSpeechClient(client_credentials="YOUR_API_KEY")
+        with open("audio.mp3", "rb") as audio_file:
+            result = await client.audio.transcriptions.create(
+                file=audio_file,
+                language="ru-RU"
+            )
+            print(result.text)
+
+    asyncio.run(transcribe())
+
+Advanced Usage:
+    # Using the low-level API
+    from salute_speech.speech_recognition import SberSpeechRecognition
+
+    client = SberSpeechRecognition(client_credentials="YOUR_CREDENTIALS")
+
+    # Upload audio file
+    with open("audio.mp3", "rb") as audio_file:
+        file_id = client.upload_file(audio_file)
+
+    # Start recognition task
+    task = client.async_recognize(
+        request_file_id=file_id,
+        audio_encoding="MP3",
+        sample_rate=44100,
+        channels_count=2
+    )
+
+    # Check task status and get results
+    status = client.get_task_status(task.id)
+    if status.get("status") == "COMPLETED":
+        response_file_id = status.get("response_file_id")
+        result = client.download_result(response_file_id)
+        print(result)
 """
 from __future__ import annotations
 
 import json
-import logging
-from time import time
+from time import sleep
 from io import FileIO
-import uuid
-from urllib.parse import urlencode
 from dataclasses import dataclass
-from typing import Optional, BinaryIO
+from typing import BinaryIO
 import asyncio
 from salute_speech.utils.russian_certs import russian_secure_get, russian_secure_post
-from dataclasses import dataclass
-from typing import Optional, BinaryIO
-import asyncio
+from salute_speech.utils.audio import AudioValidator
+from salute_speech.utils.token import TokenManager
+from salute_speech.utils.logging import setup_logger
+from salute_speech.exceptions import (
+    APIError, InvalidResponseError,
+    ValidationError, TaskStatusResponseError
+)
 
-
-import tempfile
-import os
-from pydub.utils import mediainfo
-
-def _detect_audio_params(file: BinaryIO) -> tuple[str, int, int]:
-    """
-    Detect audio format parameters using pydub's mediainfo.
-    Returns tuple of (audio_encoding, sample_rate, channels_count).
-    
-    Args:
-        file: Audio file-like object
-        
-    Returns:
-        tuple: (audio_encoding, sample_rate, channels_count)
-        
-    Raises:
-        ValueError: If audio format is not supported
-    """
-    # Save current position
-    current_pos = file.tell()
-    file.seek(0)
-    
-    try:
-        # Create a temporary file to handle the audio data
-        with tempfile.NamedTemporaryFile(suffix='.audio', delete=False) as temp_file:
-            temp_file.write(file.read())
-            temp_path = temp_file.name
-        
-        try:
-            # Get audio info using mediainfo
-            info = mediainfo(temp_path)
-            
-            # Extract basic parameters
-            audio_encoding = info['codec_name'].upper()
-            sample_rate = int(info['sample_rate'])
-            channels_count = int(info['channels'])
-            
-            # Map common codec names to Sber formats
-            format_map = {
-                'MP3': 'MP3',
-                'OPUS': 'OPUS',
-                'FLAC': 'FLAC',
-                'PCM': 'PCM_S16LE',
-                'ALAW': 'ALAW',
-                'MULAW': 'MULAW',
-                'WAV': 'PCM_S16LE'
-            }
-            
-            # Map the codec to Sber format
-            audio_encoding = format_map.get(audio_encoding, 'PCM_S16LE')
-            
-            # Validate parameters according to Sber's requirements
-            if audio_encoding in ['PCM_S16LE', 'ALAW', 'MULAW']:
-                if not (8000 <= sample_rate <= 96000):
-                    logger.warning(
-                        f"Sample rate {sample_rate}Hz out of range for {audio_encoding}, "
-                        "resampling to 16000Hz"
-                    )
-                    sample_rate = 16000
-                if channels_count > 8:
-                    logger.warning(
-                        f"Too many channels ({channels_count}) for {audio_encoding}, "
-                        "using first 8 channels"
-                    )
-                    channels_count = 8
-                    
-            elif audio_encoding == 'OPUS':
-                if channels_count != 1:
-                    logger.warning("OPUS requires mono audio, using first channel")
-                    channels_count = 1
-                    
-            elif audio_encoding == 'MP3':
-                if channels_count > 2:
-                    logger.warning(
-                        f"Too many channels ({channels_count}) for MP3, using first 2 channels"
-                    )
-                    channels_count = 2
-                    
-            elif audio_encoding == 'FLAC':
-                if channels_count > 8:
-                    logger.warning(
-                        f"Too many channels ({channels_count}) for FLAC, using first 8 channels"
-                    )
-                    channels_count = 8
-            
-            logger.debug(
-                f"Detected audio parameters: {audio_encoding}, "
-                f"{sample_rate}Hz, {channels_count} channels"
-            )
-            
-            return audio_encoding, sample_rate, channels_count
-            
-        finally:
-            # Clean up temporary file
-            try:
-                os.unlink(temp_path)
-            except Exception as e:
-                logger.warning(f"Failed to remove temporary file {temp_path}: {e}")
-                
-    finally:
-        # Restore original file position
-        file.seek(current_pos)
-
-class UploadError(Exception):
-    """Exception raised for errors during the file upload process."""
-
-
-class InvalidResponseError(Exception):
-    """Exception raised for invalid responses received from the server."""
-
-
-class InvalidAudioFormatError(Exception):
-    """Exception raised for invalid responses received from the server."""
-
-
-class TokenRequestError(Exception):
-    """Exception raised when the OAuth token request fails."""
-    def __init__(self, status_code, message):
-        super().__init__(f"Token request failed with status {status_code}: {message}")
-        self.status_code = status_code
-        self.message = message
-
-
-class TokenParsingError(Exception):
-    """Exception raised when there is an issue parsing the token response."""
-
-
-class FileUploadError(Exception):
-    """Exception raised when file upload fails."""
-
-    def __init__(self, message):
-        super().__init__(message)
-
-
-class SpeechRecognitionResponseError(Exception):
-    """Exception raised for errors within the speech recognition response."""
-    def __init__(self, message):
-        super().__init__(message)
-
-
-class TaskStatusResponseError(Exception):
-    """Exception raised for errors within the task status response."""
-    def __init__(self, message):
-        super().__init__(message)
+# Configure logging
+logger = setup_logger(__name__)
 
 
 class SpeechRecognitionTask:
@@ -190,18 +88,119 @@ class SpeechRecognitionTask:
         self.status = result_data.get('status')
 
 
+@dataclass
 class SpeechRecognitionConfig:
-    def __init__(self, hypotheses_count: int = 1, enable_profanity_filter: bool = False,
-                 max_speech_timeout: str = "20s", no_speech_timeout: str = "7s",
-                 hints: (None | dict) = None, insight_models: (None | list) = None,
-                 speaker_separation_options: (None | dict) = None):
-        self.hypotheses_count = hypotheses_count
-        self.enable_profanity_filter = enable_profanity_filter
-        self.max_speech_timeout = max_speech_timeout
-        self.no_speech_timeout = no_speech_timeout
-        self.hints = hints or {}
-        self.insight_models = insight_models or []
-        self.speaker_separation_options = speaker_separation_options or {}
+    """Configuration for speech recognition tasks."""
+
+    hypotheses_count: int = 1
+    enable_profanity_filter: bool = False
+    max_speech_timeout: str = "20s"
+    no_speech_timeout: str = "7s"
+    hints: dict | None = None
+    insight_models: list | None = None
+    speaker_separation_options: dict | None = None
+
+    def __post_init__(self):
+        """Validate configuration parameters after initialization."""
+        if self.hypotheses_count < 1 or self.hypotheses_count > 10:
+            raise ValidationError("hypotheses_count must be between 1 and 10")
+
+        if not self._validate_timeout(self.max_speech_timeout):
+            raise ValidationError("max_speech_timeout must be in format 'Xs' where X is a number")
+
+        if not self._validate_timeout(self.no_speech_timeout):
+            raise ValidationError("no_speech_timeout must be in format 'Xs' where X is a number")
+
+        if self.hints is None:
+            self.hints = {}
+
+        if self.insight_models is None:
+            self.insight_models = []
+
+        if self.speaker_separation_options is None:
+            self.speaker_separation_options = {}
+
+    def _validate_timeout(self, timeout: str) -> bool:
+        """Validate timeout string format."""
+        try:
+            seconds = int(timeout[:-1])
+            return timeout.endswith('s') and seconds > 0
+        except (ValueError, IndexError):
+            return False
+
+    def to_dict(self) -> dict:
+        """Convert config to dictionary format for API request."""
+        return {
+            "hypotheses_count": self.hypotheses_count,
+            "enable_profanity_filter": self.enable_profanity_filter,
+            "max_speech_timeout": self.max_speech_timeout,
+            "no_speech_timeout": self.no_speech_timeout,
+            "hints": self.hints,
+            "insight_models": self.insight_models,
+            "speaker_separation_options": self.speaker_separation_options
+        }
+
+
+class ResponseParser:
+    """Handles parsing and validation of API responses."""
+
+    @staticmethod
+    def parse_response(response: object, expected_status: int = 200) -> dict:
+        """
+        Parse and validate an API response.
+
+        Args:
+            response: The response object from the API
+            expected_status: The expected HTTP status code
+
+        Returns:
+            dict: Parsed response data
+
+        Raises:
+            APIError: If the response is invalid or contains an error
+        """
+        if response.status_code != expected_status:
+            raise APIError(
+                f"API request failed with status {response.status_code}: {response.text}",
+                response.status_code
+            )
+
+        try:
+            response_json = response.json()
+        except json.JSONDecodeError as e:
+            raise InvalidResponseError(f"Failed to parse response as JSON: {e}") from e
+
+        if response_json.get('status') != expected_status:
+            raise APIError(
+                f"API returned error status {response_json.get('status')}: {response.text}",
+                response_json.get('status')
+            )
+
+        return response_json
+
+    @staticmethod
+    def extract_result(response_json: dict, required_fields: list) -> dict:
+        """
+        Extract and validate result fields from response.
+
+        Args:
+            response_json: Parsed response JSON
+            required_fields: List of required field names
+
+        Returns:
+            dict: Validated result data
+
+        Raises:
+            InvalidResponseError: If required fields are missing
+        """
+        if 'result' not in response_json:
+            raise InvalidResponseError("Response missing 'result' field")
+
+        result = response_json['result']
+        if missing_fields := [field for field in required_fields if field not in result]:
+            raise InvalidResponseError(f"Result missing required fields: {missing_fields}")
+
+        return result
 
 
 class SberSpeechRecognition:
@@ -209,13 +208,12 @@ class SberSpeechRecognition:
         """
         Initialize the Sber Speech Recognition client.
 
-        :param api_key: API key for authentication.
+        :param client_credentials: Base64 encoded client credentials for authentication.
         :param base_url: Base URL for the Sber Speech Recognition service.
         """
-        self.client_credentials = client_credentials
         self.base_url = base_url
-        self.token = None
-        self.token_expiry = None
+        self.token_manager = TokenManager(client_credentials)
+        self.response_parser = ResponseParser()
 
     def _get_headers(self, raw: bool = False) -> dict:
         """
@@ -224,63 +222,12 @@ class SberSpeechRecognition:
         :param raw: No content type
         :return: A dictionary with the required headers.
         """
-        if self.token_expiry is None or time() * 1000 > self.token_expiry:  # token_expiry in milliseconds
-            self._get_token()
-
         headers = {
-            "Authorization": f"Bearer {self.token}"
+            "Authorization": f"Bearer {self.token_manager.get_valid_token()}"
         }
         if not raw:
             headers["Content-Type"] = "application/json"
         return headers
-
-    def _get_token(self, scope="SALUTE_SPEECH_PERS", request_uid=None):
-        """
-        Retrieve the OAuth token.
-        https://developers.sber.ru/docs/ru/salutespeech/authentication
-
-        :return: The access token.
-        """
-
-        if request_uid is None:
-            request_uid = str(uuid.uuid4())  # need hyphens in uuid
-
-        url = "https://ngw.devices.sberbank.ru:9443/api/v2/oauth"
-        headers = {
-            "Authorization": f"Basic {self.client_credentials}",
-            "RqUID": request_uid,
-            "Content-Type": "application/x-www-form-urlencoded"
-        }
-        data = urlencode({
-            "scope": scope
-        })
-        response = russian_secure_post(url, headers=headers, data=data)
-        if response.status_code != 200:
-            raise TokenRequestError(response.status_code, response.text)
-
-        try:
-            response_json = response.json()
-            self.token = response_json["access_token"]
-            self.token_expiry = int(response_json["expires_at"])
-        except (KeyError, ValueError) as e:
-            raise TokenParsingError(f"Failed to parse token response: {e}") from e
-
-        return self.token, self.token_expiry
-
-    def _handle_upload_response_errors(self, response):
-        """Handle potential errors in the response."""
-        if response.status_code != 200:
-            raise UploadError(f"Failed to upload file, HTTP Status Code: {response.status_code}, Response: {response.text}")
-
-        response_json = response.json()
-        if response_json.get('status') != 200:
-            raise UploadError("Failed to upload file, "
-                              f"Response Status: {response_json.get('status')}, Response: {response.text}")
-
-        if 'result' not in response_json or 'request_file_id' not in response_json['result']:
-            raise InvalidResponseError(f"Unexpected response format: {response_json}")
-
-        return response_json
 
     def upload_file(self, audio_file: FileIO) -> str:
         """
@@ -293,79 +240,55 @@ class SberSpeechRecognition:
         headers = self._get_headers(raw=True)
 
         response = russian_secure_post(url, headers=headers, data=audio_file)
-        if response.status_code != 200:
-            raise FileUploadError(f"Failed to upload file: {response.text}")
+        response_json = self.response_parser.parse_response(response)
+        result = self.response_parser.extract_result(response_json, ['request_file_id'])
+        return result['request_file_id']
 
-        response_json = self._handle_upload_response_errors(response)
-        return response_json['result']['request_file_id']
-
-    def _validate_audio_params(self, audio_encoding: str, sample_rate: int, channels_count: int):
-        """
-        Validate audio parameters according to the Sber Speech API documentation.
-        https://developers.sber.ru/docs/ru/salutespeech/recognition/encodings
-
-        :param audio_encoding: The encoding of the audio file.
-        :param sample_rate: The sample rate of the audio file.
-        :param channels_count: The number of channels in the audio file.
-        """
-        valid_encodings = ['PCM_S16LE', 'OPUS', 'MP3', 'FLAC', 'ALAW', 'MULAW']
-        if audio_encoding not in valid_encodings:
-            raise ValueError(f"Invalid audio encoding: {audio_encoding}")
-
-        if audio_encoding in set(['PCM_S16LE', 'ALAW', 'MULAW']):
-            if not (8000 <= sample_rate <= 96000):
-                raise ValueError(f"Invalid sample rate for {audio_encoding}: {sample_rate}")
-            if channels_count > 8:
-                raise ValueError(f"Too many channels for {audio_encoding}: {channels_count}")
-
-        if audio_encoding == 'OPUS' and channels_count != 1:
-            raise ValueError("OPUS supports only single channel audio.")
-
-        if audio_encoding == 'MP3' and channels_count > 2:
-            raise ValueError("MP3 supports up to 2 channels only.")
-
-        if audio_encoding == 'FLAC' and channels_count > 8:
-            raise ValueError(f"Too many channels for FLAC: {channels_count}")
-
-    def async_recognize(self, request_file_id: str, language: str = "ru-RU",
-                        audio_encoding: str = "PCM_S16LE", sample_rate: int = 16000, channels_count: int = 1,
-                        config: SpeechRecognitionConfig = SpeechRecognitionConfig()):
+    def async_recognize(
+        self,
+        request_file_id: str,
+        audio_encoding: str,
+        sample_rate: int,
+        channels_count: int,
+        language: str = "ru-RU",
+        config: SpeechRecognitionConfig = None
+    ):
         """
         Transcribe audio using Sber Speech Recognition service.
 
         :param request_file_id: ID of the uploaded file.
-        :param language: Language for speech recognition.
         :param audio_encoding: Audio codec.
         :param sample_rate: Sample rate.
         :param channels_count: Number of channels in multi-channel audio.
+        :param language: Language for speech recognition.
         :param config: Salute Speech model tuning config.
         :return: Response from the server.
         """
+        # Validate audio parameters
+        _ = AudioValidator._validate_params(
+            audio_encoding, sample_rate, channels_count)
 
-        self._validate_audio_params(audio_encoding, sample_rate, channels_count)
         url = self.base_url + "speech:async_recognize"
         headers = self._get_headers()
 
-        options = vars(config)
+        if config is None:
+            config = SpeechRecognitionConfig()
+
         data = {
             "options": {
                 "language": language,
                 "audio_encoding": audio_encoding,
                 "sample_rate": sample_rate,
                 "channels_count": channels_count,
-                **options
+                **config.to_dict()
             },
             "request_file_id": request_file_id
         }
 
         response = russian_secure_post(url, headers=headers, json=data)
-        response.raise_for_status()
-
-        response_json = response.json()
-        if 'status' in response_json and response_json['status'] != 200:
-            raise SpeechRecognitionResponseError(f"Failed to initiate speech recognition: {response.text}")
-
-        return SpeechRecognitionTask(response_json.get('result'))
+        response_json = self.response_parser.parse_response(response)
+        result = self.response_parser.extract_result(response_json, ['id', 'status', 'created_at', 'updated_at'])
+        return SpeechRecognitionTask(result)
 
     def get_task_status(self, task_id: str):
         """
@@ -379,13 +302,8 @@ class SberSpeechRecognition:
         headers = self._get_headers()
 
         response = russian_secure_get(url, headers=headers, params=params)
-        response.raise_for_status()
-
-        response_json = response.json()
-        if 'status' in response_json and response_json['status'] != 200:
-            raise TaskStatusResponseError(f"Failed to get task status: {response.text}")
-
-        return response_json.get('result')
+        response_json = self.response_parser.parse_response(response)
+        return self.response_parser.extract_result(response_json, ['status'])
 
     def download_result(self, response_file_id: str) -> bytes:
         """
@@ -412,122 +330,175 @@ class TranscriptionResponse:
     task_id: str
 
 
-# Configure logging
-logger = logging.getLogger('SaluteSpeechClient')
-
 def _parse_result(json_str: str) -> str:
     """Extract normalized text from JSON response"""
     try:
         data = json.loads(json_str)
         return data[0]['results'][0]['normalized_text']
-    except Exception as e:
+    except (json.JSONDecodeError, IndexError, KeyError) as e:
         logger.error("Error parsing result: %s", e)
-        raise
+        raise ValueError(f"Failed to parse result: {e}") from e
+
+
+class TaskPoller:
+    """Handles polling for task completion."""
+
+    def __init__(self, client: SberSpeechRecognition, poll_interval: float = 10.0):
+        """
+        Initialize the task poller.
+
+        Args:
+            client: SberSpeechRecognition client instance
+            poll_interval: Time between polling attempts in seconds
+        """
+        self.client = client
+        self.poll_interval = poll_interval
+        self.logger = setup_logger(__name__)
+
+    def poll_for_result(self, task_id: str) -> str:
+        """
+        Poll for task completion and return the response file ID.
+
+        Args:
+            task_id: ID of the task to poll
+
+        Returns:
+            str: Response file ID when task is complete
+
+        Raises:
+            TaskStatusResponseError: If task fails or polling fails
+        """
+        while True:
+            task_status = self.client.get_task_status(task_id)
+            status = task_status.get('status')
+
+            if status == 'ERROR':
+                error_msg = task_status.get('error_message', 'Unknown error')
+                self.logger.error("Task failed: %s", error_msg)
+                raise TaskStatusResponseError(f"Task failed: {error_msg}")
+
+            if status == 'DONE':
+                if not (response_file_id := task_status.get('response_file_id')):
+                    raise TaskStatusResponseError("Task completed but no response file ID found")
+                return response_file_id
+
+            self.logger.debug(
+                "Task %s status: %s, waiting %s seconds",
+                task_id, status, self.poll_interval
+            )
+            sleep(self.poll_interval)
+
+
+class Audio:
+    """Handles audio operations like transcription"""
+
+    class Transcriptions:
+        """Audio transcription operations"""
+
+        def __init__(self, client):
+            """
+            Initialize the transcriptions client.
+
+            Args:
+                client: Parent client instance
+            """
+            self.client = client
+
+        async def create(
+            self,
+            file: BinaryIO,
+            language: str = "ru-RU",
+            poll_interval: float = 1.0,
+            **kwargs  # pylint: disable=unused-argument
+        ) -> TranscriptionResponse:
+            """
+            Create a transcription of the given audio file.
+
+            Args:
+                file: Audio file to transcribe
+                language: Language code (e.g., "ru-RU", "en-US")
+                poll_interval: How often to check for task completion
+                kwargs: Additional keyword arguments
+
+            Returns:
+                TranscriptionResponse with transcribed text
+            """
+            # Detect audio parameters
+            try:
+                audio_encoding, sample_rate, channels_count = AudioValidator.detect_and_validate(file)
+                self.client.logger.debug(
+                    "Detected audio parameters: %s, %s Hz, %s channels",
+                    audio_encoding, sample_rate, channels_count
+                )
+
+                # Upload the file first
+                file_id = await asyncio.to_thread(
+                    self.client.sr.upload_file,
+                    file
+                )
+
+                # Start asynchronous transcription
+                task = await asyncio.to_thread(
+                    self.client.sr.async_recognize,
+                    request_file_id=file_id,
+                    audio_encoding=audio_encoding,
+                    sample_rate=sample_rate,
+                    channels_count=channels_count,
+                    language=language
+                )
+
+                # Poll for completion and get result
+                poller = TaskPoller(self.client.sr, poll_interval=poll_interval)
+                response_file_id = await asyncio.to_thread(
+                    poller.poll_for_result,
+                    task.id
+                )
+
+                # Download and parse the result
+                result_data = await asyncio.to_thread(
+                    self.client.sr.download_result,
+                    response_file_id
+                )
+
+                text = _parse_result(result_data)
+                return TranscriptionResponse(
+                    text=text,
+                    status="DONE",
+                    task_id=task.id
+                )
+            except json.JSONDecodeError as e:
+                self.client.logger.error("Failed to parse JSON result: %s", e)
+                raise ValueError(f"Failed to parse transcription result: {e}") from e
+            except TaskStatusResponseError as e:
+                self.client.logger.error("Task error: %s", e)
+                raise
+
+    def __init__(self, client):
+        """
+        Initialize the audio client.
+
+        Args:
+            client: Parent client instance
+        """
+        self.client = client
+        self.transcriptions = self.Transcriptions(client)
+
 
 class SaluteSpeechClient:
-    """A simplified interface for Sber Speech Recognition, similar to OpenAI's Whisper API"""
-    
+    """
+    High-level client for Sber Salute Speech API, similar to OpenAI API.
+
+    Provides an easy-to-use interface for transcribing audio files.
+    """
+
     def __init__(self, client_credentials: str):
-        """Initialize the client with credentials"""
-        logger.debug("Initializing SimpleSpeechClient")
-        self.client = SberSpeechRecognition(client_credentials=client_credentials)
-        self.audio = self.Audio(self.client)
+        """
+        Initialize the Salute Speech client.
 
-    class Audio:
-        def __init__(self, client: SberSpeechRecognition):
-            self.client = client
-            self.transcriptions = self.Transcriptions(client)
-
-        class Transcriptions:
-            def __init__(self, client: SberSpeechRecognition):
-                self.client = client
-
-            async def create(
-                self,
-                file: BinaryIO,
-                model: str = "general",
-                language: str = "ru-RU",
-                response_format: str = "text",
-                prompt: Optional[str] = None,
-                poll_interval: float = 1.0
-            ) -> TranscriptionResponse:
-                """Create a transcription for the given audio file."""
-                try:
-                    logger.debug("Starting transcription process")
-
-                    # Detect audio format parameters
-                    audio_encoding, sample_rate, channels_count = _detect_audio_params(file)
-                    logger.debug(f"Detected audio params: {audio_encoding}, {sample_rate}Hz, {channels_count} channels")    
-
-                    # First, ensure we have a valid token
-                    logger.debug("Getting authentication token")
-                    self.client._get_token()
-                    logger.debug("Token obtained successfully")
-
-                    # Configure recognition
-                    logger.debug("Configuring recognition parameters")
-                    config = SpeechRecognitionConfig(
-                        hints={"words": [prompt]} if prompt else None
-                    )
-
-                    # Upload the file
-                    logger.debug("Uploading audio file")
-                    file_id = self.client.upload_file(file)
-                    logger.debug("File uploaded successfully. File ID: %s", file_id)
-
-                    # Start async recognition
-                    logger.debug("Starting async recognition")
-                    task = self.client.async_recognize(
-                        request_file_id=file_id,
-                        language=language,
-                        audio_encoding=audio_encoding,
-                        sample_rate=sample_rate,
-                        channels_count=channels_count,
-                        config=config
-                    )
-                    logger.debug("Recognition task created. Task ID: %s", task.id)
-
-                    # Poll for results
-                    attempt = 0
-                    while True:
-                        attempt += 1
-                        try:
-                            logger.debug("Polling attempt %s for task %s", attempt, task.id)
-                            result = self.client.get_task_status(task.id)
-                            status = result.get('status')
-                            logger.debug("Current status: %s", status)
-
-                            if status == 'ERROR':
-                                error_msg = result.get('error_message', 'Unknown error')
-                                logger.error("Transcription failed: %s", error_msg)
-                                raise Exception(f"Transcription failed: {error_msg}")
-                            
-                            if status == 'DONE':
-                                logger.debug("Task completed successfully")
-                                if response_format == "text":
-                                    response_file_id = result.get('response_file_id')
-                                    logger.debug("Downloading result file: %s", response_file_id)
-                                    raw_result = self.client.download_result(response_file_id)
-                                    text = _parse_result(raw_result)
-                                    logger.debug("Result downloaded successfully")
-                                    return TranscriptionResponse(
-                                        text=text,
-                                        status=status,
-                                        task_id=task.id
-                                    )
-                                else:
-                                    raise ValueError(f"Unsupported response format: {response_format}")
-
-                            logger.debug("Waiting %s seconds before next poll", poll_interval)
-                            await asyncio.sleep(poll_interval)
-
-                        except TaskStatusResponseError as e:
-                            logger.error("Error checking task status: %s", str(e))
-                            raise Exception(f"Error checking task status: {str(e)}") from e
-                        except Exception as e:
-                            logger.error("Unexpected error: %s", str(e), exc_info=True)
-                            raise
-
-                except Exception as e:
-                    logger.error("Error in transcription process: %s", str(e), exc_info=True)
-                    raise
+        Args:
+            client_credentials: Authentication token (API key)
+        """
+        self.sr = SberSpeechRecognition(client_credentials)
+        self.token_manager = self.sr.token_manager
+        self.audio = Audio(self)
+        self.logger = setup_logger(__name__)
