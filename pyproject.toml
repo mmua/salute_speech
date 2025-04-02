@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "salute_speech"
-version = "1.2.4"
+version = "1.3.0"
 description = "Sber Salute Speech API"
 readme = "README.md"
 authors = [
@@ -25,6 +25,14 @@ dependencies = [
     "pydub>=0.25.1",
 ]
 
+[project.optional-dependencies]
+test = [
+    "pytest>=7.0.0",
+    "pytest-cov>=3.0.0",
+    "pytest-mock>=3.7.0",
+    "numpy>=1.20.0",
+]
+
 [project.urls]
 Homepage = "https://github.com/mmua/salute_speech"
 Repository = "https://github.com/mmua/salute_speech.git"
@@ -33,7 +41,7 @@ Repository = "https://github.com/mmua/salute_speech.git"
 salute_speech = "salute_speech:cli"
 
 [tool.setuptools]
-packages = ["salute_speech"]
+packages = {find = {where = ["src"]}}
 include-package-data = true
 zip-safe = false
 
