@@ -25,7 +25,7 @@ import os
 
 async def main():
     # Initialize the client (from environment variable)
-    client = SaluteSpeechClient(api_key=os.getenv("SBER_SPEECH_API_KEY"))
+    client = SaluteSpeechClient(client_credentials=os.getenv("SBER_SPEECH_API_KEY"))
     
     # Open and transcribe an audio file
     with open("audio.mp3", "rb") as audio_file:
