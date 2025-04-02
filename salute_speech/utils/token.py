@@ -1,10 +1,11 @@
 """
 Token management utilities for Sber Speech Recognition service.
 """
+from __future__ import annotations
+
 import uuid
 from time import time
 from urllib.parse import urlencode
-from typing import Tuple
 
 from salute_speech.utils.russian_certs import russian_secure_post
 from salute_speech.exceptions import TokenRequestError, TokenParsingError
@@ -46,7 +47,7 @@ class TokenManager:
             self._refresh_token(scope)
         return self.token
 
-    def _refresh_token(self, scope: str) -> Tuple[str, int]:
+    def _refresh_token(self, scope: str) -> tuple[str, int]:
         """
         Refresh the OAuth token.
 

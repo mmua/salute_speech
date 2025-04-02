@@ -1,11 +1,12 @@
 """
 Logging configuration for the Sber Speech Recognition service.
 """
+from __future__ import annotations
+
 import logging
-from typing import Optional
 
 
-def setup_logger(name: str, level: Optional[int] = None) -> logging.Logger:
+def setup_logger(name: str, level: int | None = None) -> logging.Logger:
     """
     Set up a logger with consistent formatting.
 

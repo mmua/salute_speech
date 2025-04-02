@@ -244,6 +244,7 @@ class SberSpeechRecognition:
         result = self.response_parser.extract_result(response_json, ['request_file_id'])
         return result['request_file_id']
 
+    # pylint: disable=too-many-positional-arguments
     def async_recognize(
         self,
         request_file_id: str,
