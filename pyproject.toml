@@ -41,7 +41,7 @@ Repository = "https://github.com/mmua/salute_speech.git"
 salute_speech = "salute_speech:cli"
 
 [tool.setuptools]
-packages = ["salute_speech"]
+packages = {find = {where = ["src"]}}
 include-package-data = true
 zip-safe = false
 
