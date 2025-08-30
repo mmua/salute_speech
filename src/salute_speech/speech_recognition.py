@@ -65,9 +65,8 @@ from __future__ import annotations
 import json
 from time import sleep
 import os
-from io import FileIO
 from dataclasses import dataclass
-from typing import BinaryIO, Optional, List, Any
+from typing import BinaryIO, Any
 import asyncio
 from salute_speech.utils.russian_certs import russian_secure_get, russian_secure_post
 from salute_speech.utils.audio import AudioValidator
@@ -257,15 +256,14 @@ class SberSpeechRecognition:
         result = self.response_parser.extract_result(response_json, ["request_file_id"])
         return result["request_file_id"]
 
-    # pylint: disable=too-many-positional-arguments
-    def async_recognize(
+    def async_recognize(  # pylint: disable=too-many-positional-arguments
         self,
         request_file_id: str,
         audio_encoding: str,
         sample_rate: int,
         channels_count: int,
         language: str = "ru-RU",
-        config: Optional[SpeechRecognitionConfig] = None,
+        config: SpeechRecognitionConfig | None = None,
     ) -> SpeechRecognitionTask:
         """
         Transcribe audio using Sber Speech Recognition service.
@@ -359,7 +357,7 @@ class TranscriptionResponse:
     text: str
     """The transcribed text."""
 
-    segments: Optional[List[TranscriptionSegment]] = None
+    segments: list[TranscriptionSegment] | None = None
     """Segments of the transcribed text and their corresponding details."""
 
     # Sber-specific fields (not in OpenAI API)
@@ -389,26 +387,22 @@ def _parse_result(json_str: str) -> str:
     items = _load_result_items(json_str)
     texts: list[str] = []
     for item in items:
-        try:
-            res0 = item.get("results", [{}])[0]
-            t = (res0.get("normalized_text") or "").strip()
-            if t:
-                texts.append(t)
-        except Exception:  # noqa: BLE001
-            continue
+        res0 = item.get("results", [{}])[0]
+        if (t := (res0.get("normalized_text") or "").strip()):
+            texts.append(t)
     return " ".join(texts).strip()
 
 
 def _convert_to_whisper(
     json_str: str, language: str | None = None
-) -> tuple[str, List[TranscriptionSegment], str, float]:
+) -> tuple[str, list[TranscriptionSegment], str, float]:
     """Convert Sber JSON response into Whisper-like (text, segments, language, duration)."""
     try:
         data = _load_result_items(json_str)
-        segments: List[TranscriptionSegment] = []
+        segments: list[TranscriptionSegment] = []
         full_text_parts = []
         max_end_time = 0.0
-        
+
         for idx, item in enumerate(data):
             # Sber structure: item['results'][0] has 'start', 'end' with 'Xs' and 'normalized_text'
             res0 = item.get("results", [{}])[0]
@@ -434,17 +428,16 @@ def _convert_to_whisper(
             )
             if text:
                 full_text_parts.append(text.strip())
-            
+
             # Track the maximum end time for duration calculation
             max_end_time = max(max_end_time, end_f)
 
         # Default to 'ru' (Russian) if no language specified, as this is Sber's primary language
         lang_code = "ru"
         if language:
-            try:
-                lang_code = language.split("-")[0].lower()
-            except Exception:  # noqa: BLE001
-                lang_code = "ru"
+            # best-effort normalization like "en-US" -> "en"
+            parts = language.split("-")
+            lang_code = (parts[0] or "ru").lower()
 
         return " ".join(full_text_parts).strip(), segments, lang_code, max_end_time
     except (json.JSONDecodeError, TypeError) as e:
@@ -520,7 +513,7 @@ class Audio:
             """
             self.client = client
 
-        async def create(
+        async def create(  # pylint: disable=too-many-positional-arguments
             self,
             file: BinaryIO,
             language: str = "ru-RU",
@@ -537,6 +530,7 @@ class Audio:
                 language: Language code (e.g., "ru-RU", "en-US")
                 poll_interval: How often to check for task completion
                 config: Optional SpeechRecognitionConfig for advanced tuning
+                debug_dump: Optional path or directory to dump raw JSON result
                 kwargs: Additional keyword arguments
 
             Returns:
@@ -589,7 +583,7 @@ class Audio:
                         with open(dump_path, "w", encoding="utf-8") as f_out:
                             f_out.write(result_data)
                         self.client.logger.debug("Raw result dumped to %s", dump_path)
-                    except Exception as dump_err:  # noqa: BLE001
+                    except OSError as dump_err:
                         self.client.logger.error(
                             "Failed to dump raw result: %s", dump_err
                         )

@@ -2,7 +2,6 @@ import os
 import shutil
 import tempfile
 import unittest
-import click
 from unittest.mock import patch, MagicMock, AsyncMock
 from click.testing import CliRunner
 from salute_speech.commands.cmd_transcribe_audio import transcribe_audio

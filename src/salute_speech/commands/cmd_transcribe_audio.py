@@ -11,15 +11,15 @@ _ = load_dotenv(find_dotenv())
 
 
 async def transcribe_audio_async(
-    audio_file_path,
+    audio_file_path: str,
+    *,
     channels: int,
     language: str,
     output_format: str,
     output_file: str,
     debug_dump: str,
 ):
-    api_key = os.getenv("SBER_SPEECH_API_KEY")
-    if not api_key:
+    if not (api_key := os.getenv("SBER_SPEECH_API_KEY")):
         raise click.ClickException("Error: env variable SBER_SPEECH_API_KEY is not set")
 
     client = SaluteSpeechClient(api_key)
@@ -93,7 +93,7 @@ async def transcribe_audio_async(
     default="",
     help="Optional path or directory to dump raw JSON result",
 )
-def transcribe_audio(
+def transcribe_audio(  # pylint: disable=too-many-positional-arguments
     audio_file_path,
     channels: int,
     language: str,

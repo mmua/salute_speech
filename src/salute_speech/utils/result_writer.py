@@ -24,7 +24,7 @@ import json
 import sys
 import zlib
 import os
-from typing import Callable, Optional, TextIO
+from typing import Callable, Optional
 from salute_speech.speech_recognition import TranscriptionResponse
 
 

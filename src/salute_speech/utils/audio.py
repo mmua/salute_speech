@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import os
 import tempfile
-from typing import BinaryIO, Optional, Tuple, TypedDict, Dict
+from typing import BinaryIO, TypedDict
 from pydub.utils import mediainfo  # type: ignore[import-untyped]
 
 from salute_speech.exceptions import ValidationError
@@ -19,12 +19,12 @@ logger = setup_logger(__name__)
 
 class ValidEncodingRule(TypedDict, total=True):
     max_channels: int
-    sample_rate_range: Optional[Tuple[int, int]]
-    default_rate: Optional[int]
+    sample_rate_range: tuple[int, int] | None
+    default_rate: int | None
 
 
 class AudioValidator:
-    VALID_ENCODINGS: Dict[str, ValidEncodingRule] = {
+    VALID_ENCODINGS: dict[str, ValidEncodingRule] = {
         "PCM_S16LE": {
             "max_channels": 8,
             "sample_rate_range": (8000, 96000),
@@ -45,7 +45,7 @@ class AudioValidator:
         },
     }
 
-    FORMAT_MAP: Dict[str, str] = {
+    FORMAT_MAP: dict[str, str] = {
         "MP3": "MP3",
         "OPUS": "OPUS",
         "FLAC": "FLAC",
@@ -87,18 +87,17 @@ class AudioValidator:
 
             try:
                 info = mediainfo(temp_path)
-                codec_raw = (info.get("codec_name") or info.get("format_name") or "").upper()
-                if not codec_raw:
+                if not (codec_raw := (info.get("codec_name") or info.get("format_name") or "").upper()):
                     raise ValidationError(
                         "Unable to detect audio encoding. The file may be empty or invalid."
                     )
                 try:
                     sample_rate = int(info.get("sample_rate", 0))
                     channels_count = int(info.get("channels", 0))
-                except (TypeError, ValueError):
+                except (TypeError, ValueError) as exc:
                     raise ValidationError(
                         "Unable to detect audio parameters. The file may be empty or invalid."
-                    )
+                    ) from exc
 
                 if not sample_rate or not channels_count:
                     raise ValidationError(
