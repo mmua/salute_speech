@@ -1,6 +1,7 @@
 """
 Exceptions for the salute_speech package.
 """
+
 from __future__ import annotations
 
 

@@ -3,7 +3,13 @@
 """Top-level package for Sber Salute Speech App"""
 
 import click
-from .commands import upload_audio, recognize_audio, get_task_status, download_result, transcribe_audio
+from .commands import (
+    upload_audio,
+    recognize_audio,
+    get_task_status,
+    download_result,
+    transcribe_audio,
+)
 
 
 @click.group()

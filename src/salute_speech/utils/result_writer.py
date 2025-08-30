@@ -19,15 +19,16 @@
 
 # pylint: disable=all
 
-from io import FileIO
+from typing import TextIO
 import json
 import sys
 import zlib
 import os
 from typing import Callable, Optional, TextIO
+from salute_speech.speech_recognition import TranscriptionResponse
 
 
-if (system_encoding := sys.getdefaultencoding()) != 'utf-8':
+if (system_encoding := sys.getdefaultencoding()) != "utf-8":
 
     def make_safe(string):
         # replaces any character not representable using the system default encoding with an '?',
@@ -88,26 +89,33 @@ def format_timestamp(
 
 
 class ResultWriter:
-    def __init__(self, output_file: FileIO):
+    def __init__(self, output_file: TextIO):
         self.output_file = output_file
 
     def __call__(
-        self, result: list, options: Optional[dict] = None, **kwargs
+        self, result: TranscriptionResponse, options: Optional[dict] = None, **kwargs
     ):
         self.write_result(result, file=self.output_file, options=options, **kwargs)
 
     def write_result(
-        self, result: list, file: TextIO, options: Optional[dict] = None, **kwargs
+        self,
+        result: TranscriptionResponse,
+        file: TextIO,
+        options: Optional[dict] = None,
+        **kwargs,
     ):
         raise NotImplementedError
 
 
 class WriteTXT(ResultWriter):
     def write_result(
-        self, result: list, file: TextIO, options: Optional[dict] = None, **kwargs
+        self,
+        result: TranscriptionResponse,
+        file: TextIO,
+        options: Optional[dict] = None,
+        **kwargs,
     ):
-        for segment in result:
-            print(segment['results'][0]['normalized_text'].strip(), file=file, flush=True)
+        print((result.text or "").strip(), file=file, flush=True)
 
 
 class SubtitlesWriter(ResultWriter):
@@ -116,7 +124,7 @@ class SubtitlesWriter(ResultWriter):
 
     def iterate_result(
         self,
-        result: dict,
+        result: TranscriptionResponse,
         options: Optional[dict] = None,
         *,
         max_line_width: Optional[int] = None,
@@ -132,10 +140,12 @@ class SubtitlesWriter(ResultWriter):
         max_line_width = max_line_width or 1000
         max_words_per_line = max_words_per_line or 1000
 
-        for segment in result:
-            segment_start = self.format_timestamp(float(segment['results'][0]['start'].replace('s', '')))
-            segment_end = self.format_timestamp(float(segment['results'][0]["end"].replace('s', '')))
-            segment_text = segment['results'][0]["normalized_text"].strip().replace("-->", "->")
+        if not result.segments:
+            return
+        for seg in result.segments:
+            segment_start = self.format_timestamp(float(seg.start))
+            segment_end = self.format_timestamp(float(seg.end))
+            segment_text = (seg.text or "").strip().replace("-->", "->")
             yield segment_start, segment_end, segment_text
 
     def format_timestamp(self, seconds: float):
@@ -146,7 +156,11 @@ class SubtitlesWriter(ResultWriter):
         )
 
     def write_result(
-        self, result: list, file: TextIO, options: Optional[dict] = None, **kwargs
+        self,
+        result: TranscriptionResponse,
+        file: TextIO,
+        options: Optional[dict] = None,
+        **kwargs,
     ):
         raise NotImplementedError
 
@@ -157,7 +171,11 @@ class WriteVTT(SubtitlesWriter):
     decimal_marker: str = "."
 
     def write_result(
-        self, result: list, file: TextIO, options: Optional[dict] = None, **kwargs
+        self,
+        result: TranscriptionResponse,
+        file: TextIO,
+        options: Optional[dict] = None,
+        **kwargs,
     ):
         print("WEBVTT\n", file=file)
         for start, end, text in self.iterate_result(result, options, **kwargs):
@@ -170,7 +188,11 @@ class WriteSRT(SubtitlesWriter):
     decimal_marker: str = ","
 
     def write_result(
-        self, result: list, file: TextIO, options: Optional[dict] = None, **kwargs
+        self,
+        result: TranscriptionResponse,
+        file: TextIO,
+        options: Optional[dict] = None,
+        **kwargs,
     ):
         for i, (start, end, text) in enumerate(
             self.iterate_result(result, options, **kwargs), start=1
@@ -191,27 +213,51 @@ class WriteTSV(ResultWriter):
     extension: str = "tsv"
 
     def write_result(
-        self, result: list, file: TextIO, options: Optional[dict] = None, **kwargs
+        self,
+        result: TranscriptionResponse,
+        file: TextIO,
+        options: Optional[dict] = None,
+        **kwargs,
     ):
         print("start", "end", "text", sep="\t", file=file)
-        for segment in result:
-            print(round(1000 * float(segment['results'][0]['start'].replace('s', ''))), file=file, end="\t")
-            print(round(1000 * float(segment['results'][0]['end'].replace('s', ''))), file=file, end="\t")
-            print(segment['results'][0]["normalized_text"].strip().replace("\t", " "), file=file, flush=True)
+        if not result.segments:
+            return
+        for seg in result.segments:
+            print(round(1000 * float(seg.start)), file=file, end="\t")
+            print(round(1000 * float(seg.end)), file=file, end="\t")
+            print((seg.text or "").strip().replace("\t", " "), file=file, flush=True)
 
 
 class WriteJSON(ResultWriter):
     extension: str = "json"
 
     def write_result(
-        self, result: list, file: TextIO, options: Optional[dict] = None, **kwargs
+        self,
+        result: TranscriptionResponse,
+        file: TextIO,
+        options: Optional[dict] = None,
+        **kwargs,
     ):
-        json.dump(result, file)
+        payload = {
+            "text": result.text,
+            "duration": result.duration,
+            "segments": [
+                {
+                    "id": seg.id,
+                    "start": seg.start,
+                    "end": seg.end,
+                    "text": seg.text,
+                }
+                for seg in (result.segments or [])
+            ],
+            "language": result.language,
+        }
+        json.dump(payload, file)
 
 
 def get_writer(
-    output_format: str, output_file: FileIO
-) -> Callable[[dict, TextIO, dict], None]:
+    output_format: str, output_file: TextIO
+) -> Callable[[TranscriptionResponse], None]:
     writers = {
         "txt": WriteTXT,
         "vtt": WriteVTT,
@@ -219,6 +265,9 @@ def get_writer(
         "tsv": WriteTSV,
         "json": WriteJSON,
     }
+
+    if output_format not in writers:
+        raise ValueError(f"Unsupported output format: {output_format}")
 
     return writers[output_format](output_file)
 
@@ -235,10 +284,12 @@ def filename_to_format(output_file: str) -> str:
     """
     ext = os.path.splitext(output_file)[1].lower()
     format_from_ext = {
-        '.txt': 'txt',
-        '.vtt': 'vtt',
-        '.srt': 'srt',
-        '.tsv': 'tsv',
-        '.json': 'json'
+        ".txt": "txt",
+        ".vtt": "vtt",
+        ".srt": "srt",
+        ".tsv": "tsv",
+        ".json": "json",
     }
-    return format_from_ext.get(ext, 'txt')  # Default to 'txt' if extension is not recognized
+    return format_from_ext.get(
+        ext, "txt"
+    )  # Default to 'txt' if extension is not recognized
