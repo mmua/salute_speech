@@ -1,12 +1,13 @@
 """
 Audio handling utilities for Sber Speech Recognition service.
 """
+
 from __future__ import annotations
 
 import os
 import tempfile
-from typing import BinaryIO
-from pydub.utils import mediainfo
+from typing import BinaryIO, TypedDict
+from pydub.utils import mediainfo  # type: ignore[import-untyped]
 
 from salute_speech.exceptions import ValidationError
 from salute_speech.utils.logging import setup_logger
@@ -16,24 +17,42 @@ from salute_speech.utils.logging import setup_logger
 logger = setup_logger(__name__)
 
 
+class ValidEncodingRule(TypedDict, total=True):
+    max_channels: int
+    sample_rate_range: tuple[int, int] | None
+    default_rate: int | None
+
+
 class AudioValidator:
-    VALID_ENCODINGS = {
-        'PCM_S16LE': {'max_channels': 8, 'sample_rate_range': (8000, 96000), 'default_rate': 16000},
-        'OPUS': {'max_channels': 1, 'sample_rate_range': None, 'default_rate': None},
-        'MP3': {'max_channels': 2, 'sample_rate_range': None, 'default_rate': None},
-        'FLAC': {'max_channels': 8, 'sample_rate_range': None, 'default_rate': None},
-        'ALAW': {'max_channels': 8, 'sample_rate_range': (8000, 96000), 'default_rate': 16000},
-        'MULAW': {'max_channels': 8, 'sample_rate_range': (8000, 96000), 'default_rate': 16000}
+    VALID_ENCODINGS: dict[str, ValidEncodingRule] = {
+        "PCM_S16LE": {
+            "max_channels": 8,
+            "sample_rate_range": (8000, 96000),
+            "default_rate": 16000,
+        },
+        "OPUS": {"max_channels": 1, "sample_rate_range": None, "default_rate": None},
+        "MP3": {"max_channels": 2, "sample_rate_range": None, "default_rate": None},
+        "FLAC": {"max_channels": 8, "sample_rate_range": None, "default_rate": None},
+        "ALAW": {
+            "max_channels": 8,
+            "sample_rate_range": (8000, 96000),
+            "default_rate": 16000,
+        },
+        "MULAW": {
+            "max_channels": 8,
+            "sample_rate_range": (8000, 96000),
+            "default_rate": 16000,
+        },
     }
 
-    FORMAT_MAP = {
-        'MP3': 'MP3',
-        'OPUS': 'OPUS',
-        'FLAC': 'FLAC',
-        'PCM': 'PCM_S16LE',
-        'ALAW': 'ALAW',
-        'MULAW': 'MULAW',
-        'WAV': 'PCM_S16LE'
+    FORMAT_MAP: dict[str, str] = {
+        "MP3": "MP3",
+        "OPUS": "OPUS",
+        "FLAC": "FLAC",
+        "PCM": "PCM_S16LE",
+        "ALAW": "ALAW",
+        "MULAW": "MULAW",
+        "WAV": "PCM_S16LE",
     }
 
     @classmethod
@@ -60,32 +79,51 @@ class AudioValidator:
         file.seek(0)
 
         try:
-            with tempfile.NamedTemporaryFile(suffix='.audio', delete=False) as temp_file:
+            with tempfile.NamedTemporaryFile(
+                suffix=".audio", delete=False
+            ) as temp_file:
                 temp_file.write(file.read())
                 temp_path = temp_file.name
 
             try:
                 info = mediainfo(temp_path)
-                audio_encoding = info['codec_name'].upper()
-                sample_rate = int(info['sample_rate'])
-                channels_count = int(info['channels'])
+                if not (codec_raw := (info.get("codec_name") or info.get("format_name") or "").upper()):
+                    raise ValidationError(
+                        "Unable to detect audio encoding. The file may be empty or invalid."
+                    )
+                try:
+                    sample_rate = int(info.get("sample_rate", 0))
+                    channels_count = int(info.get("channels", 0))
+                except (TypeError, ValueError) as exc:
+                    raise ValidationError(
+                        "Unable to detect audio parameters. The file may be empty or invalid."
+                    ) from exc
+
+                if not sample_rate or not channels_count:
+                    raise ValidationError(
+                        "Unable to detect audio parameters. The file may be empty or invalid."
+                    )
 
                 # Map to Sber format
-                audio_encoding = cls.FORMAT_MAP.get(audio_encoding, 'PCM_S16LE')
+                audio_encoding = cls.FORMAT_MAP.get(codec_raw, "PCM_S16LE")
 
                 return audio_encoding, sample_rate, channels_count
 
             finally:
                 try:
                     os.unlink(temp_path)
-                except (OSError) as e:
-                    logger.warning("Failed to remove temporary file %s: %s", temp_path, e)
+                except OSError as e:
+                    logger.warning(
+                        "Failed to remove temporary file %s: %s", temp_path, e
+                    )
 
         finally:
             file.seek(current_pos)
 
     @classmethod
-    def _validate_params(cls, audio_encoding: str, sample_rate: int, channels_count: int) -> tuple[str, int, int]:
+    def _validate_params(
+        cls, audio_encoding: str, sample_rate: int, channels_count: int
+    ) -> tuple[str, int, int]:
         """
         Validate audio parameters according to Sber requirements.
 
@@ -106,7 +144,7 @@ class AudioValidator:
         rules = cls.VALID_ENCODINGS[audio_encoding]
 
         # Validate channels count
-        if channels_count > rules['max_channels']:
+        if channels_count > rules["max_channels"]:
             raise ValidationError(
                 f"Too many channels ({channels_count}) for {audio_encoding}. "
                 f"Maximum allowed channels is {rules['max_channels']}. "
@@ -114,8 +152,8 @@ class AudioValidator:
             )
 
         # Validate sample rate
-        if rules['sample_rate_range']:
-            min_rate, max_rate = rules['sample_rate_range']
+        if rules["sample_rate_range"]:
+            min_rate, max_rate = rules["sample_rate_range"]
             if not (min_rate <= sample_rate <= max_rate):
                 raise ValidationError(
                     f"Sample rate {sample_rate}Hz is out of valid range [{min_rate}-{max_rate}]Hz "
@@ -124,7 +162,9 @@ class AudioValidator:
 
         logger.debug(
             "Validated audio parameters: %s, %sHz, %s channels",
-            audio_encoding, sample_rate, channels_count
+            audio_encoding,
+            sample_rate,
+            channels_count,
         )
 
         return audio_encoding, sample_rate, channels_count

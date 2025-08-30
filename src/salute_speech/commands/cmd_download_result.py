@@ -7,11 +7,13 @@ _ = load_dotenv(find_dotenv())
 
 
 @click.command()
-@click.argument('response_file_id', nargs=1)
-@click.argument('transcript_file_path', nargs=1, default='')
-def download_result(response_file_id: str, transcript_file_path: click.Path()):
-    if (api_key := os.getenv('SBER_SPEECH_API_KEY')) is None:
-        click.echo(click.style('Error: env variable SBER_SPEECH_API_KEY is not set', fg='red'))
+@click.argument("response_file_id", nargs=1)
+@click.argument("transcript_file_path", nargs=1, default="")
+def download_result(response_file_id: str, transcript_file_path: str):
+    if (api_key := os.getenv("SBER_SPEECH_API_KEY")) is None:
+        click.echo(
+            click.style("Error: env variable SBER_SPEECH_API_KEY is not set", fg="red")
+        )
         raise click.Abort
 
     sr = SberSpeechRecognition(api_key)

@@ -1,5 +1,6 @@
-from pkg_resources import resource_filename
+import importlib.resources
 
 
 def get_config_path(config_name):
-    return resource_filename('salute_speech', f'conf/{config_name}')
+    path = importlib.resources.files("salute_speech") / "conf" / config_name
+    return str(path)
